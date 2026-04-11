@@ -153,7 +153,7 @@ async fn update_issue(
                      resolved_in_release = NULL WHERE id = ?",
                 )
                 .bind(&input.snooze_until)
-                .bind(&input.snooze_event_count)
+                .bind(input.snooze_event_count)
                 .bind(id)
                 .execute(state.db.writer())
                 .await

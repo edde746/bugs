@@ -210,15 +210,15 @@ async fn create_release(
             .execute(state.db.writer())
             .await;
 
-            if let Ok(r) = result {
-                if r.rows_affected() > 0 {
-                    tracing::info!(
-                        project = slug,
-                        version = input.version,
-                        count = r.rows_affected(),
-                        "Auto-resolved issues for new release"
-                    );
-                }
+            if let Ok(r) = result
+                && r.rows_affected() > 0
+            {
+                tracing::info!(
+                    project = slug,
+                    version = input.version,
+                    count = r.rows_affected(),
+                    "Auto-resolved issues for new release"
+                );
             }
         }
     }

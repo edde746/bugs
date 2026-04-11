@@ -65,12 +65,12 @@ pub fn spawn(
 
             tick_count += 1;
             // Every ~60 seconds (12 ticks * 5s)
-            if tick_count % 12 == 0 {
+            if tick_count.is_multiple_of(12) {
                 unmute_expired_issues(&db_poll).await;
                 update_transaction_percentiles(&db_poll).await;
             }
             // Every ~5 minutes (60 ticks * 5s): clean up old transactions
-            if tick_count % 60 == 0 {
+            if tick_count.is_multiple_of(60) {
                 cleanup_old_transactions(&db_poll, config_poll.retention_days).await;
             }
         }
@@ -155,10 +155,10 @@ async fn cleanup_old_transactions(db: &DbPool, retention_days: u32) {
     .execute(db.writer())
     .await;
 
-    if let Ok(r) = result {
-        if r.rows_affected() > 0 {
-            info!(count = r.rows_affected(), "Cleaned up old transactions");
-        }
+    if let Ok(r) = result
+        && r.rows_affected() > 0
+    {
+        info!(count = r.rows_affected(), "Cleaned up old transactions");
     }
 }
 
