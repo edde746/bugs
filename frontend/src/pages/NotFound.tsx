@@ -3,15 +3,13 @@ import Button from "~/components/ui/Button";
 
 export default function NotFound() {
   return (
-    <div class="flex min-h-screen items-center justify-center p-6">
-      <div class="text-center">
-        <div class="mb-4 text-6xl font-bold text-gray-200 dark:text-gray-700">
-          404
-        </div>
-        <h1 class="mb-2 text-xl font-semibold text-[var(--color-text-primary)]">
+    <div class="center-page">
+      <div class="center-page__content">
+        <div class="center-page__404">404</div>
+        <h1 class="center-page__title" style={{ "font-size": "20px" }}>
           Page Not Found
         </h1>
-        <p class="mb-6 text-[var(--color-text-secondary)]">
+        <p class="center-page__text">
           The page you are looking for does not exist.
         </p>
         <A href="/">

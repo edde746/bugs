@@ -1,4 +1,5 @@
 import type { JSX } from "solid-js";
+import IconInbox from "~icons/lucide/inbox";
 
 interface EmptyStateProps {
   title: string;
@@ -8,19 +9,15 @@ interface EmptyStateProps {
 
 export default function EmptyState(props: EmptyStateProps) {
   return (
-    <div class="flex flex-col items-center justify-center py-16 text-center">
-      <div class="mb-3 text-4xl text-gray-300 dark:text-gray-600">
-        &#128722;
+    <div class="empty-state">
+      <div class="empty-state__icon">
+        <IconInbox />
       </div>
-      <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100">
-        {props.title}
-      </h3>
+      <h3 class="empty-state__title">{props.title}</h3>
       {props.description && (
-        <p class="mt-1 text-sm text-[var(--color-text-secondary)]">
-          {props.description}
-        </p>
+        <p class="empty-state__description">{props.description}</p>
       )}
-      {props.children && <div class="mt-4">{props.children}</div>}
+      {props.children && <div class="empty-state__actions">{props.children}</div>}
     </div>
   );
 }

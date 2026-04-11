@@ -9,6 +9,8 @@ import Badge from "~/components/ui/Badge";
 import Button from "~/components/ui/Button";
 import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
 import EmptyState from "~/components/ui/EmptyState";
+import IconArrowLeft from "~icons/lucide/arrow-left";
+import IconArrowRight from "~icons/lucide/arrow-right";
 
 export default function IssueEvents() {
   const params = useParams<{ project: string; issueId: string }>();
@@ -31,21 +33,14 @@ export default function IssueEvents() {
   const hasNext = () => !!eventsQuery.data?.nextCursor;
 
   return (
-    <div class="p-6">
-      <div class="mb-4">
-        <A
-          href={`/${params.project}/issues/${params.issueId}`}
-          class="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-        >
-          &larr; Back to Issue
-        </A>
-      </div>
+    <div class="page">
+      <A href={`/${params.project}/issues/${params.issueId}`} class="back-link">
+        <IconArrowLeft /> Back to Issue
+      </A>
 
-      <div class="mb-6">
-        <h1 class="text-2xl font-bold text-[var(--color-text-primary)]">
-          Events
-        </h1>
-        <p class="mt-1 text-sm text-[var(--color-text-secondary)]">
+      <div style={{ "margin-bottom": "24px" }}>
+        <h1 class="page__title">Events</h1>
+        <p class="page__subtitle">
           All events for issue #{params.issueId}
         </p>
       </div>
@@ -60,37 +55,31 @@ export default function IssueEvents() {
             />
           }
         >
-          <div class="overflow-hidden rounded-lg border border-[var(--color-border)]">
-            <table class="w-full">
+          <div class="card">
+            <table class="data-table">
               <thead>
-                <tr class="border-b border-[var(--color-border)] bg-[var(--color-surface-1)]">
-                  <th class="px-4 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)]">
-                    Event ID
-                  </th>
-                  <th class="px-4 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)]">
-                    Timestamp
-                  </th>
-                  <th class="px-4 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)]">
-                    Level
-                  </th>
+                <tr>
+                  <th>Event ID</th>
+                  <th>Timestamp</th>
+                  <th>Level</th>
                 </tr>
               </thead>
               <tbody>
                 <For each={eventsQuery.data?.events}>
                   {(event) => (
-                    <tr class="border-b border-[var(--color-border)] transition-colors hover:bg-[var(--color-surface-1)]">
-                      <td class="px-4 py-3">
+                    <tr>
+                      <td>
                         <A
                           href={`/${params.project}/issues/${params.issueId}/events/${event.id}`}
-                          class="font-mono text-sm text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
+                          class="link-mono"
                         >
                           {event.event_id}
                         </A>
                       </td>
-                      <td class="px-4 py-3 text-sm text-[var(--color-text-secondary)]">
+                      <td class="text-secondary">
                         {relativeTime(event.timestamp)}
                       </td>
-                      <td class="px-4 py-3">
+                      <td>
                         <Badge level={event.level} />
                       </td>
                     </tr>
@@ -100,19 +89,18 @@ export default function IssueEvents() {
             </table>
           </div>
 
-          {/* Pagination */}
-          <div class="mt-4 flex items-center justify-between">
-            <div class="text-xs text-[var(--color-text-secondary)]">
+          <div class="table-footer">
+            <div class="table-footer__count">
               Showing {eventsQuery.data?.events.length ?? 0} events
             </div>
-            <div class="flex gap-2">
+            <div class="pagination">
               <Button
                 variant="ghost"
                 size="sm"
                 disabled={!hasPrev()}
                 onClick={() => setSearchParams({ cursor: undefined })}
               >
-                &larr; Prev
+                <IconArrowLeft /> Prev
               </Button>
               <Button
                 variant="ghost"
@@ -124,7 +112,7 @@ export default function IssueEvents() {
                   })
                 }
               >
-                Next &rarr;
+                Next <IconArrowRight />
               </Button>
             </div>
           </div>

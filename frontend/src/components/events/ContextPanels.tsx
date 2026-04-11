@@ -1,5 +1,4 @@
 import { createSignal, For, Show } from "solid-js";
-import { clsx } from "clsx";
 
 interface ContextPanelsProps {
   contexts?: Record<string, Record<string, unknown>>;
@@ -39,7 +38,6 @@ export default function ContextPanels(props: ContextPanelsProps) {
           });
         }
       }
-      // Any other contexts
       for (const [key, value] of Object.entries(props.contexts)) {
         if (!order.includes(key) && value && Object.keys(value).length > 0) {
           result.push({
@@ -78,17 +76,13 @@ export default function ContextPanels(props: ContextPanelsProps) {
 
   return (
     <Show when={tabs().length > 0}>
-      <div class="rounded-lg border border-[var(--color-border)] overflow-hidden">
-        <div class="flex border-b border-[var(--color-border)] bg-[var(--color-surface-1)] overflow-x-auto">
+      <div class="card">
+        <div class="tabs" style={{ background: "var(--color-surface-1)", "overflow-x": "auto", "border-bottom": "1px solid var(--color-border)" }}>
           <For each={tabs()}>
             {(tab, index) => (
               <button
-                class={clsx(
-                  "px-4 py-2 text-xs font-medium whitespace-nowrap transition-colors",
-                  activeTab() === index()
-                    ? "border-b-2 border-indigo-500 text-indigo-600 dark:text-indigo-400"
-                    : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
-                )}
+                class="tab"
+                data-active={activeTab() === index()}
                 onClick={() => setActiveTab(index())}
               >
                 {tab.label}
@@ -97,16 +91,16 @@ export default function ContextPanels(props: ContextPanelsProps) {
           </For>
         </div>
         <Show when={tabs()[activeTab()]}>
-          <div class="p-4">
-            <table class="w-full text-sm">
+          <div class="card__body">
+            <table class="data-table data-table--compact">
               <tbody>
                 <For each={Object.entries(tabs()[activeTab()]!.data)}>
                   {([key, value]) => (
-                    <tr class="border-b border-[var(--color-border)] last:border-0">
-                      <td class="py-1.5 pr-4 text-xs font-medium text-[var(--color-text-secondary)] whitespace-nowrap align-top">
+                    <tr>
+                      <td class="text-secondary" style={{ "white-space": "nowrap", "vertical-align": "top", "padding-right": "16px", "font-family": "var(--font-sans)", "font-weight": "500" }}>
                         {key}
                       </td>
-                      <td class="py-1.5 text-xs font-mono text-[var(--color-text-primary)] break-all">
+                      <td style={{ "word-break": "break-all" }}>
                         {typeof value === "object"
                           ? JSON.stringify(value)
                           : String(value ?? "")}

@@ -1,6 +1,5 @@
 import { A, useParams, useSearchParams } from "@solidjs/router";
 import { createQuery } from "@tanstack/solid-query";
-import { clsx } from "clsx";
 import { createSignal, For, Show } from "solid-js";
 import { api } from "~/api/client";
 import { queryKeys } from "~/queries/keys";
@@ -12,6 +11,8 @@ import Button from "~/components/ui/Button";
 import RelativeTime from "~/components/ui/RelativeTime";
 import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
 import EmptyState from "~/components/ui/EmptyState";
+import IconArrowLeft from "~icons/lucide/arrow-left";
+import IconArrowRight from "~icons/lucide/arrow-right";
 
 const STATUSES = ["unresolved", "resolved", "ignored"] as const;
 const SORT_OPTIONS = [
@@ -72,25 +73,18 @@ export default function ProjectIssues() {
   const hasNext = () => !!issuesQuery.data?.nextCursor;
 
   return (
-    <div class="p-6">
-      <div class="mb-6">
-        <h1 class="text-2xl font-bold text-[var(--color-text-primary)]">
-          Issues
-        </h1>
+    <div class="page">
+      <div class="page__header">
+        <h1 class="page__title">Issues</h1>
       </div>
 
-      {/* Status filter tabs + sort */}
-      <div class="mb-4 flex items-center justify-between border-b border-[var(--color-border)]">
-        <div class="flex gap-1">
+      <div class="filter-bar">
+        <div class="tabs" style={{ border: "none" }}>
           <For each={STATUSES}>
             {(s) => (
               <button
-                class={clsx(
-                  "px-3 py-2 text-sm font-medium transition-colors",
-                  status() === s
-                    ? "border-b-2 border-indigo-500 text-indigo-600 dark:text-indigo-400"
-                    : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
-                )}
+                class="tab"
+                data-active={status() === s}
                 onClick={() => setSearchParams({ status: s, cursor: undefined })}
               >
                 {STATUS_LABELS[s] ?? s}
@@ -98,14 +92,14 @@ export default function ProjectIssues() {
             )}
           </For>
         </div>
-        <div class="flex items-center gap-2 pb-1">
-          <label class="text-xs text-[var(--color-text-secondary)]">Sort:</label>
+        <div class="filter-bar__sort">
+          <label class="filter-bar__sort-label">Sort:</label>
           <select
             value={sort()}
             onChange={(e) =>
               setSearchParams({ sort: e.currentTarget.value, cursor: undefined })
             }
-            class="rounded border border-[var(--color-border)] bg-[var(--color-surface-0)] px-2 py-1 text-xs text-[var(--color-text-primary)] focus:border-indigo-500 focus:outline-none"
+            class="select"
           >
             <For each={SORT_OPTIONS}>
               {(opt) => <option value={opt.value}>{opt.label}</option>}
@@ -124,68 +118,55 @@ export default function ProjectIssues() {
             />
           }
         >
-          <div class="overflow-hidden rounded-lg border border-[var(--color-border)]">
-            <table class="w-full">
+          <div class="card">
+            <table class="data-table">
               <thead>
-                <tr class="border-b border-[var(--color-border)] bg-[var(--color-surface-1)]">
-                  <th class="w-10 px-3 py-2">
+                <tr>
+                  <th style={{ width: "40px", "padding-left": "12px", "padding-right": "12px" }}>
                     <input
                       type="checkbox"
+                      class="checkbox"
                       checked={
                         selectedIssues().size > 0 &&
                         selectedIssues().size ===
                           (issuesQuery.data?.issues.length ?? 0)
                       }
                       onChange={toggleSelectAll}
-                      class="rounded border-gray-300"
                     />
                   </th>
-                  <th class="px-4 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)]">
-                    Level
-                  </th>
-                  <th class="px-4 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)]">
-                    Error
-                  </th>
-                  <th class="px-4 py-2 text-right text-xs font-medium text-[var(--color-text-secondary)]">
-                    Events
-                  </th>
-                  <th class="px-4 py-2 text-right text-xs font-medium text-[var(--color-text-secondary)]">
-                    Last Seen
-                  </th>
+                  <th>Level</th>
+                  <th>Error</th>
+                  <th data-align="right">Events</th>
+                  <th data-align="right">Last Seen</th>
                 </tr>
               </thead>
               <tbody>
                 <For each={issuesQuery.data?.issues}>
                   {(issue) => (
-                    <tr class="border-b border-[var(--color-border)] transition-colors hover:bg-[var(--color-surface-1)]">
-                      <td class="w-10 px-3 py-3">
+                    <tr>
+                      <td style={{ width: "40px", "padding-left": "12px", "padding-right": "12px" }}>
                         <input
                           type="checkbox"
+                          class="checkbox"
                           checked={selectedIssues().has(issue.id)}
                           onChange={() => toggleSelect(issue.id)}
-                          class="rounded border-gray-300"
                         />
                       </td>
-                      <td class="px-4 py-3">
+                      <td>
                         <Badge level={issue.level} />
                       </td>
-                      <td class="px-4 py-3">
-                        <A
-                          href={`/${params.project}/issues/${issue.id}`}
-                          class="font-medium text-[var(--color-text-primary)] hover:text-indigo-600 dark:hover:text-indigo-400"
-                        >
+                      <td>
+                        <A href={`/${params.project}/issues/${issue.id}`}>
                           {issue.title}
                         </A>
                         {issue.culprit && (
-                          <div class="mt-0.5 text-xs text-[var(--color-text-secondary)]">
-                            {issue.culprit}
-                          </div>
+                          <div class="culprit">{issue.culprit}</div>
                         )}
                       </td>
-                      <td class="px-4 py-3 text-right text-sm text-[var(--color-text-secondary)]">
+                      <td data-align="right" class="text-secondary">
                         {formatNumber(issue.event_count)}
                       </td>
-                      <td class="px-4 py-3 text-right text-sm text-[var(--color-text-secondary)]">
+                      <td data-align="right" class="text-secondary">
                         <RelativeTime date={issue.last_seen} />
                       </td>
                     </tr>
@@ -195,19 +176,18 @@ export default function ProjectIssues() {
             </table>
           </div>
 
-          {/* Pagination */}
-          <div class="mt-4 flex items-center justify-between">
-            <div class="text-xs text-[var(--color-text-secondary)]">
+          <div class="table-footer">
+            <div class="table-footer__count">
               Showing {issuesQuery.data?.issues.length ?? 0} issues
             </div>
-            <div class="flex gap-2">
+            <div class="pagination">
               <Button
                 variant="ghost"
                 size="sm"
                 disabled={!hasPrev()}
                 onClick={() => setSearchParams({ cursor: undefined })}
               >
-                &larr; Prev
+                <IconArrowLeft /> Prev
               </Button>
               <Button
                 variant="ghost"
@@ -219,7 +199,7 @@ export default function ProjectIssues() {
                   })
                 }
               >
-                Next &rarr;
+                Next <IconArrowRight />
               </Button>
             </div>
           </div>

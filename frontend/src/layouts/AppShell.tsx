@@ -4,13 +4,13 @@ import SearchBar from "~/components/search/SearchBar";
 
 export default function AppShell(props: RouteSectionProps) {
   return (
-    <div class="flex h-screen overflow-hidden">
+    <div class="app-shell">
       <Sidebar />
-      <div class="flex flex-1 flex-col overflow-hidden">
-        <header class="flex h-14 items-center border-b border-[var(--color-border)] bg-[var(--color-surface-0)] px-6">
+      <div class="app-shell__content">
+        <header class="app-shell__header">
           <SearchBar />
         </header>
-        <main class="flex-1 overflow-y-auto bg-[var(--color-surface-0)]">
+        <main class="app-shell__main">
           {props.children}
         </main>
       </div>

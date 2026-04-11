@@ -58,12 +58,11 @@ export default function SearchBar() {
   };
 
   const handleBlur = () => {
-    // Delay closing so clicks on results register
     setTimeout(() => setIsOpen(false), 200);
   };
 
   return (
-    <div class="relative w-full max-w-md">
+    <div class="search-bar">
       <input
         type="text"
         value={query()}
@@ -71,26 +70,24 @@ export default function SearchBar() {
         onFocus={() => results().length > 0 && setIsOpen(true)}
         onBlur={handleBlur}
         placeholder="Search events..."
-        class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        class="search-bar__input"
       />
       <Show when={loading()}>
-        <div class="absolute right-3 top-1/2 -translate-y-1/2">
-          <div class="h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-indigo-500" />
-        </div>
+        <div class="search-bar__spinner" />
       </Show>
       <Show when={isOpen() && results().length > 0}>
-        <div class="absolute top-full left-0 z-50 mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] shadow-lg overflow-hidden">
+        <div class="search-bar__dropdown">
           <For each={results().slice(0, 10)}>
             {(result) => (
               <button
-                class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--color-surface-1)] transition-colors"
+                class="search-bar__result"
                 onMouseDown={() => handleSelect(result)}
               >
                 <Badge level={result.level} />
-                <span class="flex-1 truncate text-[var(--color-text-primary)]">
+                <span class="search-bar__result-title">
                   {result.title ?? result.message ?? result.event_id}
                 </span>
-                <span class="text-xs text-[var(--color-text-secondary)]">
+                <span class="search-bar__result-time">
                   {relativeTime(result.timestamp)}
                 </span>
               </button>

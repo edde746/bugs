@@ -1,3 +1,5 @@
+import IconArrowLeft from "~icons/lucide/arrow-left";
+import IconArrowRight from "~icons/lucide/arrow-right";
 import Button from "~/components/ui/Button";
 
 interface PaginationProps {
@@ -9,14 +11,14 @@ interface PaginationProps {
 
 export default function Pagination(props: PaginationProps) {
   return (
-    <div class="flex items-center gap-2">
+    <div class="pagination">
       <Button
         variant="ghost"
         size="sm"
         disabled={!props.hasPrev}
         onClick={props.onPrev}
       >
-        &larr; Prev
+        <IconArrowLeft /> Prev
       </Button>
       <Button
         variant="ghost"
@@ -24,7 +26,7 @@ export default function Pagination(props: PaginationProps) {
         disabled={!props.hasNext}
         onClick={props.onNext}
       >
-        Next &rarr;
+        Next <IconArrowRight />
       </Button>
     </div>
   );

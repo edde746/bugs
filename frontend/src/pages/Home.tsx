@@ -26,7 +26,7 @@ export default function Home() {
   });
 
   return (
-    <div class="flex min-h-screen items-center justify-center">
+    <div class="center-page">
       <LoadingSkeleton rows={3} />
     </div>
   );

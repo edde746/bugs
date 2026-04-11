@@ -6,6 +6,9 @@ import { queryKeys } from "~/queries/keys";
 import type { Project, ProjectKey } from "~/lib/sentry-types";
 import Button from "~/components/ui/Button";
 import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
+import IconArrowLeft from "~icons/lucide/arrow-left";
+import IconClipboard from "~icons/lucide/clipboard-copy";
+import IconCheck from "~icons/lucide/check";
 
 export default function SettingsProjectDetail() {
   const params = useParams<{ projectId: string }>();
@@ -32,40 +35,28 @@ export default function SettingsProjectDetail() {
   };
 
   return (
-    <div class="p-6">
-      <div class="mb-4">
-        <A
-          href="/settings/projects"
-          class="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-        >
-          &larr; Back to Projects
-        </A>
-      </div>
+    <div class="page">
+      <A href="/settings/projects" class="back-link">
+        <IconArrowLeft /> Back to Projects
+      </A>
 
       <Show when={projectQuery.data} fallback={<LoadingSkeleton rows={6} />}>
         {(project) => (
           <>
-            <div class="mb-6">
-              <h1 class="text-2xl font-bold text-[var(--color-text-primary)]">
-                {project().name}
-              </h1>
-              <p class="mt-1 text-sm text-[var(--color-text-secondary)]">
+            <div style={{ "margin-bottom": "24px" }}>
+              <h1 class="page__title">{project().name}</h1>
+              <p class="page__subtitle">
                 Slug: {project().slug} | Platform: {project().platform ?? "N/A"}{" "}
                 | Created: {new Date(project().created_at).toLocaleDateString()}
               </p>
             </div>
 
-            {/* DSN Keys */}
-            <div class="rounded-lg border border-[var(--color-border)] overflow-hidden">
-              <div class="border-b border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3">
-                <h2 class="text-sm font-medium text-[var(--color-text-primary)]">
-                  DSN Keys
-                </h2>
-                <p class="mt-0.5 text-xs text-[var(--color-text-secondary)]">
-                  Use these DSN values to configure your Sentry SDK client.
-                </p>
+            <div class="card">
+              <div class="card__header" style={{ "flex-direction": "column", "align-items": "flex-start" }}>
+                <h2>DSN Keys</h2>
+                <p>Use these DSN values to configure your Sentry SDK client.</p>
               </div>
-              <div class="p-4">
+              <div class="card__body">
                 <Show
                   when={keysQuery.data}
                   fallback={<LoadingSkeleton rows={2} />}
@@ -74,73 +65,64 @@ export default function SettingsProjectDetail() {
                     <Show
                       when={keys().length > 0}
                       fallback={
-                        <p class="text-sm text-[var(--color-text-secondary)]">
+                        <p class="text-secondary text-sm">
                           No DSN keys configured for this project.
                         </p>
                       }
                     >
-                      <div class="space-y-4">
+                      <div style={{ display: "flex", "flex-direction": "column", gap: "16px" }}>
                         <For each={keys()}>
                           {(key) => (
-                            <div class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-0)] p-3">
-                              <div class="flex items-center justify-between mb-2">
-                                <span class="text-sm font-medium text-[var(--color-text-primary)]">
+                            <div class="dsn-card">
+                              <div class="dsn-card__header">
+                                <span class="dsn-card__label">
                                   {key.label || "Default"}
                                 </span>
                                 <span
-                                  class={`text-xs ${key.is_active ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
+                                  class="dsn-card__status"
+                                  data-active={key.is_active}
                                 >
                                   {key.is_active ? "Active" : "Inactive"}
                                 </span>
                               </div>
-                              <div class="space-y-2">
-                                <div>
-                                  <label class="text-xs text-[var(--color-text-secondary)]">
-                                    Public Key
-                                  </label>
-                                  <div class="flex items-center gap-2 mt-0.5">
-                                    <code class="flex-1 rounded bg-[var(--color-surface-2)] px-2 py-1 text-xs font-mono text-[var(--color-text-primary)] break-all">
-                                      {key.public_key}
-                                    </code>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() =>
-                                        copyToClipboard(
-                                          key.public_key,
-                                          `key-${key.id}`,
-                                        )
-                                      }
-                                    >
-                                      {copiedId() === `key-${key.id}`
-                                        ? "Copied!"
-                                        : "Copy"}
-                                    </Button>
-                                  </div>
+                              <div class="dsn-card__field">
+                                <label>Public Key</label>
+                                <div class="dsn-card__field-value">
+                                  <code>{key.public_key}</code>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() =>
+                                      copyToClipboard(
+                                        key.public_key,
+                                        `key-${key.id}`,
+                                      )
+                                    }
+                                  >
+                                    {copiedId() === `key-${key.id}`
+                                      ? <><IconCheck /> Copied!</>
+                                      : <><IconClipboard /> Copy</>}
+                                  </Button>
                                 </div>
-                                <div>
-                                  <label class="text-xs text-[var(--color-text-secondary)]">
-                                    DSN
-                                  </label>
-                                  <div class="flex items-center gap-2 mt-0.5">
-                                    <code class="flex-1 rounded bg-[var(--color-surface-2)] px-2 py-1 text-xs font-mono text-[var(--color-text-primary)] break-all">
-                                      {key.dsn}
-                                    </code>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() =>
-                                        copyToClipboard(
-                                          key.dsn,
-                                          `dsn-${key.id}`,
-                                        )
-                                      }
-                                    >
-                                      {copiedId() === `dsn-${key.id}`
-                                        ? "Copied!"
-                                        : "Copy"}
-                                    </Button>
-                                  </div>
+                              </div>
+                              <div class="dsn-card__field">
+                                <label>DSN</label>
+                                <div class="dsn-card__field-value">
+                                  <code>{key.dsn}</code>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() =>
+                                      copyToClipboard(
+                                        key.dsn,
+                                        `dsn-${key.id}`,
+                                      )
+                                    }
+                                  >
+                                    {copiedId() === `dsn-${key.id}`
+                                      ? <><IconCheck /> Copied!</>
+                                      : <><IconClipboard /> Copy</>}
+                                  </Button>
                                 </div>
                               </div>
                             </div>

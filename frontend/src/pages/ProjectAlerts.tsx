@@ -5,6 +5,7 @@ import { api } from "~/api/client";
 import type { AlertRuleResponse } from "~/lib/sentry-types";
 import { relativeTime } from "~/lib/formatters";
 import Button from "~/components/ui/Button";
+import Modal from "~/components/ui/Modal";
 import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
 import EmptyState from "~/components/ui/EmptyState";
 
@@ -30,7 +31,7 @@ export default function ProjectAlerts() {
   const [name, setName] = createSignal("");
   const [conditionType, setConditionType] = createSignal("NewIssue");
   const [webhookUrl, setWebhookUrl] = createSignal("");
-  const [showForm, setShowForm] = createSignal(false);
+  const [showModal, setShowModal] = createSignal(false);
 
   const alertsQuery = createQuery(() => ({
     queryKey: ["alerts", params.project],
@@ -51,7 +52,7 @@ export default function ProjectAlerts() {
       setName("");
       setConditionType("NewIssue");
       setWebhookUrl("");
-      setShowForm(false);
+      setShowModal(false);
     },
   }));
 
@@ -70,83 +71,86 @@ export default function ProjectAlerts() {
   };
 
   return (
-    <div class="p-6">
-      <div class="mb-6 flex items-center justify-between">
-        <h1 class="text-2xl font-bold text-[var(--color-text-primary)]">
-          Alerts
-        </h1>
+    <div class="page">
+      <div class="page__header">
+        <h1 class="page__title">Alerts</h1>
         <Button
           variant="primary"
           size="sm"
-          onClick={() => setShowForm(!showForm())}
+          onClick={() => setShowModal(true)}
         >
-          {showForm() ? "Cancel" : "Create Alert Rule"}
+          Create Alert Rule
         </Button>
       </div>
 
-      {/* Create form */}
-      <Show when={showForm()}>
-        <form
-          onSubmit={handleSubmit}
-          class="mb-6 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4"
-        >
-          <h2 class="mb-4 text-lg font-medium text-[var(--color-text-primary)]">
-            New Alert Rule
-          </h2>
-          <div class="space-y-4">
-            <div>
-              <label class="mb-1 block text-sm font-medium text-[var(--color-text-primary)]">
-                Name
-              </label>
-              <input
-                type="text"
-                value={name()}
-                onInput={(e) => setName(e.currentTarget.value)}
-                required
-                class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                placeholder="Alert rule name"
-              />
-            </div>
-            <div>
-              <label class="mb-1 block text-sm font-medium text-[var(--color-text-primary)]">
-                Condition Type
-              </label>
-              <select
-                value={conditionType()}
-                onChange={(e) => setConditionType(e.currentTarget.value)}
-                class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              >
-                <For each={CONDITION_TYPES}>
-                  {(ct) => <option value={ct.value}>{ct.label}</option>}
-                </For>
-              </select>
-            </div>
-            <div>
-              <label class="mb-1 block text-sm font-medium text-[var(--color-text-primary)]">
-                Webhook URL
-              </label>
-              <input
-                type="url"
-                value={webhookUrl()}
-                onInput={(e) => setWebhookUrl(e.currentTarget.value)}
-                required
-                class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                placeholder="https://hooks.example.com/webhook"
-              />
-            </div>
-            <div class="flex justify-end">
-              <Button
-                type="submit"
-                variant="primary"
-                size="sm"
-                disabled={createMut.isPending}
-              >
-                {createMut.isPending ? "Creating..." : "Create Rule"}
-              </Button>
-            </div>
+      <Modal
+        open={showModal()}
+        onClose={() => setShowModal(false)}
+        title="New Alert Rule"
+        description="Configure a condition and webhook to receive notifications."
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setShowModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              disabled={createMut.isPending || !name().trim() || !webhookUrl().trim()}
+              onClick={() => {
+                const ct = conditionType();
+                const condition: { type: string; threshold?: number; window_seconds?: number } =
+                  ct === "FrequencyThreshold"
+                    ? { type: ct, threshold: 1, window_seconds: 3600 }
+                    : { type: ct };
+                createMut.mutate({
+                  name: name(),
+                  conditions: [condition],
+                  actions: [{ type: "Webhook", url: webhookUrl() }],
+                });
+              }}
+            >
+              {createMut.isPending ? "Creating..." : "Create Rule"}
+            </Button>
+          </>
+        }
+      >
+        <div class="form-stack">
+          <div class="form-field">
+            <label class="field-label">Name</label>
+            <input
+              type="text"
+              value={name()}
+              onInput={(e) => setName(e.currentTarget.value)}
+              class="input"
+              placeholder="Alert rule name"
+            />
           </div>
-        </form>
-      </Show>
+          <div class="form-field">
+            <label class="field-label">Condition Type</label>
+            <select
+              value={conditionType()}
+              onChange={(e) => setConditionType(e.currentTarget.value)}
+              class="input"
+            >
+              <For each={CONDITION_TYPES}>
+                {(ct) => <option value={ct.value}>{ct.label}</option>}
+              </For>
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="field-label">Webhook URL</label>
+            <input
+              type="url"
+              value={webhookUrl()}
+              onInput={(e) => setWebhookUrl(e.currentTarget.value)}
+              class="input"
+              placeholder="https://hooks.example.com/webhook"
+            />
+          </div>
+        </div>
+      </Modal>
 
       <Show when={!alertsQuery.isPending} fallback={<LoadingSkeleton rows={4} />}>
         <Show
@@ -158,38 +162,28 @@ export default function ProjectAlerts() {
             />
           }
         >
-          <div class="overflow-hidden rounded-lg border border-[var(--color-border)]">
-            <table class="w-full">
+          <div class="card">
+            <table class="data-table">
               <thead>
-                <tr class="border-b border-[var(--color-border)] bg-[var(--color-surface-1)]">
-                  <th class="px-4 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)]">
-                    Name
-                  </th>
-                  <th class="px-4 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)]">
-                    Condition
-                  </th>
-                  <th class="px-4 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)]">
-                    Webhook URL
-                  </th>
-                  <th class="px-4 py-2 text-right text-xs font-medium text-[var(--color-text-secondary)]">
-                    Created
-                  </th>
+                <tr>
+                  <th>Name</th>
+                  <th>Condition</th>
+                  <th>Webhook URL</th>
+                  <th data-align="right">Created</th>
                 </tr>
               </thead>
               <tbody>
                 <For each={alertsQuery.data}>
                   {(rule) => (
-                    <tr class="border-b border-[var(--color-border)] transition-colors hover:bg-[var(--color-surface-1)]">
-                      <td class="px-4 py-3 text-sm font-medium text-[var(--color-text-primary)]">
-                        {rule.name}
+                    <tr>
+                      <td style={{ "font-weight": "500" }}>{rule.name}</td>
+                      <td class="text-secondary">
+                        {rule.conditions.length > 0 ? conditionLabel(rule.conditions[0].type) : "\u2014"}
                       </td>
-                      <td class="px-4 py-3 text-sm text-[var(--color-text-secondary)]">
-                        {rule.conditions.length > 0 ? conditionLabel(rule.conditions[0].type) : "—"}
-                      </td>
-                      <td class="px-4 py-3 font-mono text-xs text-[var(--color-text-secondary)]">
+                      <td class="text-secondary text-mono" style={{ "font-size": "12px" }}>
                         {firstWebhookUrl(rule)}
                       </td>
-                      <td class="px-4 py-3 text-right text-sm text-[var(--color-text-secondary)]">
+                      <td data-align="right" class="text-secondary">
                         {relativeTime(rule.created_at)}
                       </td>
                     </tr>

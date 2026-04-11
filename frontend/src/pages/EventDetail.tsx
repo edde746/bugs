@@ -6,12 +6,14 @@ import { queryKeys } from "~/queries/keys";
 import type { Event as SentryEvent } from "~/lib/sentry-types";
 import { relativeTime } from "~/lib/formatters";
 import Badge from "~/components/ui/Badge";
-import Button from "~/components/ui/Button";
 import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
 import ExceptionDisplay from "~/components/events/ExceptionDisplay";
 import BreadcrumbsTimeline from "~/components/events/BreadcrumbsTimeline";
 import ContextPanels from "~/components/events/ContextPanels";
 import TagsTable from "~/components/events/TagsTable";
+import IconArrowLeft from "~icons/lucide/arrow-left";
+import IconEye from "~icons/lucide/eye";
+import IconEyeOff from "~icons/lucide/eye-off";
 
 export default function EventDetail() {
   const params = useParams<{
@@ -39,9 +41,7 @@ export default function EventDetail() {
   const exceptions = () => {
     const data = parsedData();
     if (!data) return [];
-    // Sentry stores exceptions in exception.values
     if (data.exception?.values) return data.exception.values;
-    // Some events have it at top level
     if (data.exceptions) return data.exceptions;
     return [];
   };
@@ -80,36 +80,28 @@ export default function EventDetail() {
   };
 
   return (
-    <div class="p-6">
-      <div class="mb-4">
-        <A
-          href={`/${params.project}/issues/${params.issueId}`}
-          class="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-        >
-          &larr; Back to Issue
-        </A>
-      </div>
+    <div class="page">
+      <A href={`/${params.project}/issues/${params.issueId}`} class="back-link">
+        <IconArrowLeft /> Back to Issue
+      </A>
 
       <Show when={eventQuery.data} fallback={<LoadingSkeleton rows={10} />}>
         {(event) => (
-          <>
-            {/* Event metadata header */}
-            <div class="mb-6">
-              <div class="mb-2 flex items-center gap-2">
+          <div class="section-gap">
+            <div>
+              <div class="inline-gap" style={{ "margin-bottom": "8px" }}>
                 <Badge level={event().level} />
                 <Show when={event().platform}>
-                  <span class="rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 text-xs font-mono text-[var(--color-text-secondary)]">
-                    {event().platform}
-                  </span>
+                  <span class="meta-tag">{event().platform}</span>
                 </Show>
-                <span class="text-sm text-[var(--color-text-secondary)]">
+                <span class="text-sm text-secondary">
                   {relativeTime(event().timestamp)}
                 </span>
               </div>
-              <h1 class="text-xl font-bold text-[var(--color-text-primary)]">
+              <h1 class="page__title" style={{ "font-size": "20px" }}>
                 {event().title ?? event().message ?? "Event"}
               </h1>
-              <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-text-secondary)] font-mono">
+              <div class="meta-row" style={{ "margin-top": "8px" }}>
                 <span>ID: {event().event_id}</span>
                 <Show when={event().environment}>
                   <span>Env: {event().environment}</span>
@@ -123,56 +115,41 @@ export default function EventDetail() {
               </div>
             </div>
 
-            {/* Exception Display + Stack Trace */}
             <Show when={exceptions().length > 0}>
-              <div class="mb-6">
-                <ExceptionDisplay exceptions={exceptions()} />
-              </div>
+              <ExceptionDisplay exceptions={exceptions()} />
             </Show>
 
-            {/* Breadcrumbs */}
             <Show when={breadcrumbs().length > 0}>
-              <div class="mb-6">
-                <BreadcrumbsTimeline breadcrumbs={breadcrumbs()} />
-              </div>
+              <BreadcrumbsTimeline breadcrumbs={breadcrumbs()} />
             </Show>
 
-            {/* Tags */}
             <Show when={tags().length > 0}>
-              <div class="mb-6">
-                <TagsTable tags={tags()} />
-              </div>
+              <TagsTable tags={tags()} />
             </Show>
 
-            {/* Context Panels */}
-            <div class="mb-6">
-              <ContextPanels
-                contexts={contexts()}
-                request={request()}
-                user={user()}
-              />
-            </div>
+            <ContextPanels
+              contexts={contexts()}
+              request={request()}
+              user={user()}
+            />
 
-            {/* Raw JSON */}
-            <div class="rounded-lg border border-[var(--color-border)] overflow-hidden">
+            <div class="raw-json">
               <button
-                class="flex w-full items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-left"
+                class="raw-json__toggle"
                 onClick={() => setShowRaw(!showRaw())}
               >
-                <h2 class="text-sm font-medium text-[var(--color-text-primary)]">
-                  Raw JSON
-                </h2>
-                <span class="text-xs text-[var(--color-text-secondary)]">
-                  {showRaw() ? "Hide" : "Show"}
+                <span class="raw-json__toggle-label">Raw JSON</span>
+                <span class="raw-json__toggle-icon">
+                  {showRaw() ? <IconEyeOff /> : <IconEye />}
                 </span>
               </button>
               <Show when={showRaw()}>
-                <pre class="max-h-[600px] overflow-auto p-4 text-xs text-[var(--color-text-primary)] bg-[var(--color-surface-0)]">
+                <pre class="raw-json__content">
                   {JSON.stringify(parsedData(), null, 2)}
                 </pre>
               </Show>
             </div>
-          </>
+          </div>
         )}
       </Show>
     </div>

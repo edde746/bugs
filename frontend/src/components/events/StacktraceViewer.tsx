@@ -1,5 +1,6 @@
 import { createSignal, For, Show } from "solid-js";
-import { clsx } from "clsx";
+import IconChevronDown from "~icons/lucide/chevron-down";
+import IconChevronRight from "~icons/lucide/chevron-right";
 import Button from "~/components/ui/Button";
 
 export interface StackFrame {
@@ -49,11 +50,9 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
   };
 
   return (
-    <div class="rounded-lg border border-[var(--color-border)] overflow-hidden">
-      <div class="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-2">
-        <h3 class="text-sm font-medium text-[var(--color-text-primary)]">
-          Stack Trace
-        </h3>
+    <div class="stacktrace">
+      <div class="stacktrace__header">
+        <h3>Stack Trace</h3>
         <Button
           variant="ghost"
           size="sm"
@@ -62,7 +61,7 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
           {allExpanded() ? "Collapse All" : "Expand All"}
         </Button>
       </div>
-      <div class="divide-y divide-[var(--color-border)]">
+      <div class="stacktrace__frames">
         <For each={reversedFrames()}>
           {(frame, index) => {
             const isExpanded = () => expandedFrames().has(index());
@@ -72,24 +71,18 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
               (frame.post_context && frame.post_context.length > 0);
 
             return (
-              <div
-                class={clsx(
-                  frame.in_app
-                    ? "bg-[var(--color-surface-1)]"
-                    : "bg-[var(--color-surface-0)]",
-                )}
-              >
+              <div class="stacktrace__frame" data-in-app={frame.in_app ?? false}>
                 <button
-                  class="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-[var(--color-surface-2)] transition-colors"
+                  class="stacktrace__frame-btn"
                   onClick={() => toggleFrame(index())}
                 >
-                  <span class="text-[var(--color-text-secondary)] text-xs w-4">
-                    {isExpanded() ? "\u25BC" : "\u25B6"}
+                  <span class="stacktrace__toggle-icon">
+                    {isExpanded() ? <IconChevronDown /> : <IconChevronRight />}
                   </span>
-                  <span class="font-mono text-xs text-[var(--color-text-primary)] font-medium">
+                  <span class="stacktrace__fn-name">
                     {frame.function ?? "<anonymous>"}
                   </span>
-                  <span class="text-xs text-[var(--color-text-secondary)] truncate">
+                  <span class="stacktrace__file-name">
                     {frame.filename ?? frame.abs_path ?? frame.module ?? "unknown"}
                     <Show when={frame.lineno}>
                       :{frame.lineno}
@@ -97,14 +90,12 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
                     </Show>
                   </span>
                   <Show when={frame.in_app}>
-                    <span class="ml-auto text-[10px] font-medium text-indigo-600 dark:text-indigo-400 uppercase">
-                      app
-                    </span>
+                    <span class="stacktrace__app-tag">app</span>
                   </Show>
                 </button>
                 <Show when={isExpanded() && hasContext()}>
-                  <div class="mx-4 mb-2 overflow-x-auto rounded border border-[var(--color-border)] bg-[var(--color-surface-2)]">
-                    <pre class="text-xs leading-5">
+                  <div class="stacktrace__context">
+                    <pre>
                       <For each={frame.pre_context ?? []}>
                         {(line, lineIdx) => {
                           const lineNum = () =>
@@ -112,11 +103,11 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
                             (frame.pre_context?.length ?? 0) +
                             lineIdx();
                           return (
-                            <div class="flex">
-                              <span class="inline-block w-12 flex-shrink-0 select-none pr-3 text-right text-[var(--color-text-secondary)] opacity-50">
+                            <div class="stacktrace__context-line">
+                              <span class="stacktrace__line-number">
                                 {lineNum()}
                               </span>
-                              <span class="text-[var(--color-text-primary)]">
+                              <span class="stacktrace__line-content">
                                 {line}
                               </span>
                             </div>
@@ -124,11 +115,11 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
                         }}
                       </For>
                       <Show when={frame.context_line}>
-                        <div class="flex bg-yellow-100/50 dark:bg-yellow-900/20">
-                          <span class="inline-block w-12 flex-shrink-0 select-none pr-3 text-right text-[var(--color-text-secondary)] font-medium">
+                        <div class="stacktrace__context-line" data-highlight="true">
+                          <span class="stacktrace__line-number">
                             {frame.lineno}
                           </span>
-                          <span class="text-[var(--color-text-primary)] font-medium">
+                          <span class="stacktrace__line-content">
                             {frame.context_line}
                           </span>
                         </div>
@@ -137,11 +128,11 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
                         {(line, lineIdx) => {
                           const lineNum = () => (frame.lineno ?? 0) + 1 + lineIdx();
                           return (
-                            <div class="flex">
-                              <span class="inline-block w-12 flex-shrink-0 select-none pr-3 text-right text-[var(--color-text-secondary)] opacity-50">
+                            <div class="stacktrace__context-line">
+                              <span class="stacktrace__line-number">
                                 {lineNum()}
                               </span>
-                              <span class="text-[var(--color-text-primary)]">
+                              <span class="stacktrace__line-content">
                                 {line}
                               </span>
                             </div>

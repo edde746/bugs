@@ -1,10 +1,10 @@
 import { defineConfig } from "vite";
 import solidPlugin from "vite-plugin-solid";
-import tailwindcss from "@tailwindcss/vite";
+import Icons from "unplugin-icons/vite";
 import path from "node:path";
 
 export default defineConfig({
-  plugins: [solidPlugin(), tailwindcss()],
+  plugins: [solidPlugin(), Icons({ compiler: "solid" })],
   resolve: { alias: { "~": path.resolve(__dirname, "./src") } },
   build: {
     target: "es2022",

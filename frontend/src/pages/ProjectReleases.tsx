@@ -19,11 +19,9 @@ export default function ProjectReleases() {
   }));
 
   return (
-    <div class="p-6">
-      <div class="mb-6">
-        <h1 class="text-2xl font-bold text-[var(--color-text-primary)]">
-          Releases
-        </h1>
+    <div class="page">
+      <div class="page__header">
+        <h1 class="page__title">Releases</h1>
       </div>
 
       <Show when={!releasesQuery.isPending} fallback={<LoadingSkeleton rows={6} />}>
@@ -36,34 +34,28 @@ export default function ProjectReleases() {
             />
           }
         >
-          <div class="overflow-hidden rounded-lg border border-[var(--color-border)]">
-            <table class="w-full">
+          <div class="card">
+            <table class="data-table">
               <thead>
-                <tr class="border-b border-[var(--color-border)] bg-[var(--color-surface-1)]">
-                  <th class="px-4 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)]">
-                    Version
-                  </th>
-                  <th class="px-4 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)]">
-                    Created
-                  </th>
-                  <th class="px-4 py-2 text-right text-xs font-medium text-[var(--color-text-secondary)]">
-                    Files
-                  </th>
+                <tr>
+                  <th>Version</th>
+                  <th>Created</th>
+                  <th data-align="right">Files</th>
                 </tr>
               </thead>
               <tbody>
                 <For each={releasesQuery.data}>
                   {(release) => (
-                    <tr class="border-b border-[var(--color-border)] transition-colors hover:bg-[var(--color-surface-1)]">
-                      <td class="px-4 py-3">
-                        <span class="font-mono text-sm font-medium text-[var(--color-text-primary)]">
+                    <tr>
+                      <td>
+                        <span class="text-mono" style={{ "font-weight": "500" }}>
                           {release.version}
                         </span>
                       </td>
-                      <td class="px-4 py-3 text-sm text-[var(--color-text-secondary)]">
+                      <td class="text-secondary">
                         {relativeTime(release.created_at)}
                       </td>
-                      <td class="px-4 py-3 text-right text-sm text-[var(--color-text-secondary)]">
+                      <td data-align="right" class="text-secondary">
                         {release.file_count}
                       </td>
                     </tr>

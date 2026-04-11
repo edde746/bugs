@@ -5,7 +5,7 @@ import { api } from "~/api/client";
 import { queryKeys } from "~/queries/keys";
 import type { Issue, UpdateIssueInput, EventListResponse } from "~/lib/sentry-types";
 import { relativeTime, formatNumber } from "~/lib/formatters";
-import { STATUS_LABELS, STATUS_COLORS } from "~/lib/constants";
+import { STATUS_LABELS } from "~/lib/constants";
 import Badge from "~/components/ui/Badge";
 import Button from "~/components/ui/Button";
 import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
@@ -13,6 +13,8 @@ import ExceptionDisplay from "~/components/events/ExceptionDisplay";
 import BreadcrumbsTimeline from "~/components/events/BreadcrumbsTimeline";
 import ContextPanels from "~/components/events/ContextPanels";
 import TagsTable from "~/components/events/TagsTable";
+import IconArrowLeft from "~icons/lucide/arrow-left";
+import IconArrowRight from "~icons/lucide/arrow-right";
 
 export default function IssueDetail() {
   const params = useParams<{ project: string; issueId: string }>();
@@ -114,39 +116,28 @@ export default function IssueDetail() {
   };
 
   return (
-    <div class="p-6">
-      <div class="mb-4">
-        <A
-          href={`/${params.project}/issues`}
-          class="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-        >
-          &larr; Back to Issues
-        </A>
-      </div>
+    <div class="page">
+      <A href={`/${params.project}/issues`} class="back-link">
+        <IconArrowLeft /> Back to Issues
+      </A>
 
       <Show when={issueQuery.data} fallback={<LoadingSkeleton rows={6} />}>
         {(issue) => (
           <>
-            <div class="mb-6 flex items-start justify-between">
+            <div style={{ display: "flex", "align-items": "flex-start", "justify-content": "space-between", "margin-bottom": "24px" }}>
               <div>
-                <div class="mb-2 flex items-center gap-2">
+                <div class="inline-gap" style={{ "margin-bottom": "8px" }}>
                   <Badge level={issue().level} />
-                  <span
-                    class={`text-sm font-medium ${STATUS_COLORS[issue().status] ?? ""}`}
-                  >
+                  <span class="status-text" data-status={issue().status}>
                     {STATUS_LABELS[issue().status] ?? issue().status}
                   </span>
                 </div>
-                <h1 class="text-2xl font-bold text-[var(--color-text-primary)]">
-                  {issue().title}
-                </h1>
+                <h1 class="page__title">{issue().title}</h1>
                 {issue().culprit && (
-                  <p class="mt-1 text-sm text-[var(--color-text-secondary)]">
-                    {issue().culprit}
-                  </p>
+                  <p class="page__subtitle">{issue().culprit}</p>
                 )}
               </div>
-              <div class="flex gap-2">
+              <div class="inline-gap">
                 <Show when={issue().status !== "resolved"}>
                   <Button
                     variant="secondary"
@@ -180,46 +171,44 @@ export default function IssueDetail() {
               </div>
             </div>
 
-            {/* Stats */}
-            <div class="mb-6 grid grid-cols-3 gap-4">
-              <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4">
-                <div class="text-sm text-[var(--color-text-secondary)]">Events</div>
-                <div class="mt-1 text-2xl font-semibold text-[var(--color-text-primary)]">
+            <div class="stat-cards">
+              <div class="stat-card">
+                <div class="stat-card__label">Events</div>
+                <div class="stat-card__value">
                   {formatNumber(issue().event_count)}
                 </div>
               </div>
-              <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4">
-                <div class="text-sm text-[var(--color-text-secondary)]">First Seen</div>
-                <div class="mt-1 text-sm font-medium text-[var(--color-text-primary)]">
+              <div class="stat-card">
+                <div class="stat-card__label">First Seen</div>
+                <div class="stat-card__value stat-card__value--sm">
                   {relativeTime(issue().first_seen)}
                 </div>
               </div>
-              <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4">
-                <div class="text-sm text-[var(--color-text-secondary)]">Last Seen</div>
-                <div class="mt-1 text-sm font-medium text-[var(--color-text-primary)]">
+              <div class="stat-card">
+                <div class="stat-card__label">Last Seen</div>
+                <div class="stat-card__value stat-card__value--sm">
                   {relativeTime(issue().last_seen)}
                 </div>
               </div>
             </div>
 
-            {/* Event navigation */}
-            <div class="mb-4 flex items-center justify-between">
-              <h2 class="text-sm font-medium text-[var(--color-text-primary)]">
+            <div class="inline-gap inline-gap--between" style={{ "margin-bottom": "16px" }}>
+              <h2 class="text-sm" style={{ "font-weight": "500" }}>
                 Event{" "}
                 <Show when={eventsQuery.data}>
-                  <span class="text-[var(--color-text-secondary)]">
+                  <span class="text-secondary">
                     ({eventIndex() + 1} of {eventsQuery.data!.events.length})
                   </span>
                 </Show>
               </h2>
-              <div class="flex items-center gap-2">
+              <div class="inline-gap">
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setEventIndex((i) => i - 1)}
                   disabled={!canGoNewer()}
                 >
-                  &larr; Newer
+                  <IconArrowLeft /> Newer
                 </Button>
                 <Button
                   variant="ghost"
@@ -227,13 +216,13 @@ export default function IssueDetail() {
                   onClick={() => setEventIndex((i) => i + 1)}
                   disabled={!canGoOlder()}
                 >
-                  Older &rarr;
+                  Older <IconArrowRight />
                 </Button>
                 <Show when={currentEvent()}>
                   {(ev) => (
                     <A
                       href={`/${params.project}/issues/${params.issueId}/events/${ev().id}`}
-                      class="text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 ml-2"
+                      class="link-accent"
                     >
                       View Full Event
                     </A>
@@ -242,45 +231,37 @@ export default function IssueDetail() {
               </div>
             </div>
 
-            {/* Event content */}
             <Show when={!eventsQuery.isPending} fallback={<LoadingSkeleton rows={8} />}>
               <Show
                 when={currentEvent()}
                 fallback={
-                  <div class="text-sm text-[var(--color-text-secondary)] py-8 text-center">
+                  <div class="text-secondary text-sm" style={{ padding: "32px 0", "text-align": "center" }}>
                     No events found for this issue.
                   </div>
                 }
               >
                 {(event) => (
-                  <div class="space-y-6">
-                    {/* Event header */}
-                    <div class="flex items-center gap-3 text-xs text-[var(--color-text-secondary)] font-mono">
+                  <div class="section-gap">
+                    <div class="meta-row">
                       <span>ID: {event().event_id}</span>
                       <span>{relativeTime(event().timestamp)}</span>
                       <Show when={event().platform}>
-                        <span class="rounded bg-[var(--color-surface-2)] px-1.5 py-0.5">
-                          {event().platform}
-                        </span>
+                        <span class="meta-tag">{event().platform}</span>
                       </Show>
                     </div>
 
-                    {/* Exception Display + Stack Trace */}
                     <Show when={exceptions().length > 0}>
                       <ExceptionDisplay exceptions={exceptions()} />
                     </Show>
 
-                    {/* Breadcrumbs */}
                     <Show when={breadcrumbs().length > 0}>
                       <BreadcrumbsTimeline breadcrumbs={breadcrumbs()} />
                     </Show>
 
-                    {/* Tags */}
                     <Show when={tags().length > 0}>
                       <TagsTable tags={tags()} />
                     </Show>
 
-                    {/* Context Panels */}
                     <ContextPanels
                       contexts={contexts()}
                       request={request()}

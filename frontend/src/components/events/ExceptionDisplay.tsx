@@ -22,26 +22,22 @@ interface ExceptionDisplayProps {
 
 export default function ExceptionDisplay(props: ExceptionDisplayProps) {
   return (
-    <div class="space-y-4">
+    <div>
       <For each={props.exceptions}>
         {(exception) => (
-          <div>
-            <div class="mb-2">
-              <span class="text-lg font-bold text-[var(--color-text-primary)]">
+          <div class="exception">
+            <div>
+              <span class="exception__type">
                 {exception.type ?? "Error"}
               </span>
               <Show when={exception.value}>
-                <p class="mt-0.5 text-sm text-[var(--color-text-secondary)]">
-                  {exception.value}
-                </p>
+                <p class="exception__value">{exception.value}</p>
               </Show>
               <Show when={exception.mechanism}>
-                <p class="mt-0.5 text-xs text-[var(--color-text-secondary)]">
+                <p class="exception__mechanism">
                   Mechanism: {exception.mechanism!.type ?? "generic"}
                   {exception.mechanism!.handled === false && (
-                    <span class="ml-2 text-red-600 dark:text-red-400 font-medium">
-                      (unhandled)
-                    </span>
+                    <span class="exception__unhandled">(unhandled)</span>
                   )}
                 </p>
               </Show>

@@ -6,6 +6,7 @@ import { queryKeys } from "~/queries/keys";
 import type { Project, CreateProjectInput } from "~/lib/sentry-types";
 import { slugify } from "~/lib/formatters";
 import Button from "~/components/ui/Button";
+import Modal from "~/components/ui/Modal";
 import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
 import EmptyState from "~/components/ui/EmptyState";
 
@@ -13,6 +14,7 @@ export default function SettingsProjects() {
   const queryClient = useQueryClient();
   const [name, setName] = createSignal("");
   const [slug, setSlug] = createSignal("");
+  const [showModal, setShowModal] = createSignal(false);
 
   const projectsQuery = createQuery(() => ({
     queryKey: queryKeys.projects.all(),
@@ -26,6 +28,7 @@ export default function SettingsProjects() {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects.all() });
       setName("");
       setSlug("");
+      setShowModal(false);
     },
   }));
 
@@ -41,55 +44,63 @@ export default function SettingsProjects() {
     setSlug(slugify(value));
   };
 
-  const handleSubmit = (e: SubmitEvent) => {
-    e.preventDefault();
-    if (!name().trim() || !slug().trim()) return;
-    createMut.mutate({ name: name(), slug: slug() });
-  };
-
   return (
-    <div class="p-6">
-      <h1 class="mb-6 text-2xl font-bold text-[var(--color-text-primary)]">
-        Projects
-      </h1>
+    <div class="page">
+      <div class="page__header">
+        <h1 class="page__title">Projects</h1>
+        <Button variant="primary" size="sm" onClick={() => setShowModal(true)}>
+          Create Project
+        </Button>
+      </div>
 
-      {/* Create form */}
-      <div class="mb-8 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4">
-        <h2 class="mb-3 text-sm font-medium text-[var(--color-text-primary)]">
-          Create New Project
-        </h2>
-        <form onSubmit={handleSubmit} class="flex items-end gap-3">
-          <div class="flex-1">
-            <label class="mb-1 block text-xs text-[var(--color-text-secondary)]">
-              Name
-            </label>
+      <Modal
+        open={showModal()}
+        onClose={() => setShowModal(false)}
+        title="Create New Project"
+        description="Set up a new project to start tracking errors."
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setShowModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={createMut.isPending || !name().trim()}
+              onClick={() => {
+                if (!name().trim() || !slug().trim()) return;
+                createMut.mutate({ name: name(), slug: slug() });
+              }}
+            >
+              {createMut.isPending ? "Creating..." : "Create"}
+            </Button>
+          </>
+        }
+      >
+        <div class="form-stack">
+          <div class="form-field">
+            <label class="field-label">Name</label>
             <input
               type="text"
               value={name()}
               onInput={(e) => handleNameChange(e.currentTarget.value)}
               placeholder="My Project"
-              class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              class="input"
             />
           </div>
-          <div class="flex-1">
-            <label class="mb-1 block text-xs text-[var(--color-text-secondary)]">
-              Slug
-            </label>
+          <div class="form-field">
+            <label class="field-label">Slug</label>
             <input
               type="text"
               value={slug()}
               onInput={(e) => setSlug(e.currentTarget.value)}
               placeholder="my-project"
-              class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              class="input"
             />
           </div>
-          <Button type="submit" disabled={createMut.isPending || !name().trim()}>
-            {createMut.isPending ? "Creating..." : "Create"}
-          </Button>
-        </form>
-      </div>
+        </div>
+      </Modal>
 
-      {/* Project list */}
       <Show when={!projectsQuery.isPending} fallback={<LoadingSkeleton rows={4} />}>
         <Show
           when={projectsQuery.data && projectsQuery.data.length > 0}
@@ -100,43 +111,28 @@ export default function SettingsProjects() {
             />
           }
         >
-          <div class="overflow-hidden rounded-lg border border-[var(--color-border)]">
-            <table class="w-full">
+          <div class="card">
+            <table class="data-table">
               <thead>
-                <tr class="border-b border-[var(--color-border)] bg-[var(--color-surface-1)]">
-                  <th class="px-4 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)]">
-                    Name
-                  </th>
-                  <th class="px-4 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)]">
-                    Slug
-                  </th>
-                  <th class="px-4 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)]">
-                    Platform
-                  </th>
-                  <th class="px-4 py-2 text-right text-xs font-medium text-[var(--color-text-secondary)]">
-                    Actions
-                  </th>
+                <tr>
+                  <th>Name</th>
+                  <th>Slug</th>
+                  <th>Platform</th>
+                  <th data-align="right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 <For each={projectsQuery.data}>
                   {(project) => (
-                    <tr class="border-b border-[var(--color-border)]">
-                      <td class="px-4 py-3 text-sm font-medium text-[var(--color-text-primary)]">
-                        <A
-                          href={`/settings/projects/${project.id}`}
-                          class="hover:text-indigo-600 dark:hover:text-indigo-400"
-                        >
+                    <tr>
+                      <td>
+                        <A href={`/settings/projects/${project.id}`}>
                           {project.name}
                         </A>
                       </td>
-                      <td class="px-4 py-3 text-sm text-[var(--color-text-secondary)]">
-                        {project.slug}
-                      </td>
-                      <td class="px-4 py-3 text-sm text-[var(--color-text-secondary)]">
-                        {project.platform ?? "-"}
-                      </td>
-                      <td class="px-4 py-3 text-right">
+                      <td class="text-secondary">{project.slug}</td>
+                      <td class="text-secondary">{project.platform ?? "-"}</td>
+                      <td data-align="right">
                         <Button
                           variant="danger"
                           size="sm"
