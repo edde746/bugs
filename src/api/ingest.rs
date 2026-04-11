@@ -39,19 +39,20 @@ async fn ingest_envelope(
         .await
         .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid project key".into()))?;
 
+    // Reject if URL project_id doesn't match the key's actual project
+    if project_id != key.project_id {
+        return Err((StatusCode::BAD_REQUEST, "Project ID mismatch".into()));
+    }
+
     // Check rate limit
-    let rate_limit = key.rate_limit
-        .or_else(|| {
-            // Could check project_settings.rate_limit_per_min here too
-            None
-        });
-    if let Some(limit) = rate_limit {
-        if limit > 0 && !state.rate_limiter.check(&auth.sentry_key, limit as u64).await {
-            return Err((
-                StatusCode::TOO_MANY_REQUESTS,
-                "Rate limit exceeded".into(),
-            ));
-        }
+    if let Some(limit) = key.rate_limit
+        && limit > 0
+        && !state.rate_limiter.check(&auth.sentry_key, limit as u64).await
+    {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            "Rate limit exceeded".into(),
+        ));
     }
 
     // Check origin allowlist
@@ -64,23 +65,22 @@ async fn ingest_envelope(
         .await
         .unwrap_or(None);
 
-        if let Some((Some(allowed_json),)) = settings {
-            if let Ok(allowed) = serde_json::from_str::<Vec<String>>(&allowed_json) {
-                if !allowed.is_empty() {
-                    let origin_allowed = allowed.iter().any(|pattern| {
-                        if pattern.contains('*') {
-                            let re_pattern = pattern.replace('.', "\\.").replace('*', ".*");
-                            regex::Regex::new(&re_pattern)
-                                .map(|re| re.is_match(origin))
-                                .unwrap_or(false)
-                        } else {
-                            origin == pattern
-                        }
-                    });
-                    if !origin_allowed {
-                        return Err((StatusCode::FORBIDDEN, "Origin not allowed".into()));
-                    }
+        if let Some((Some(allowed_json),)) = settings
+            && let Ok(allowed) = serde_json::from_str::<Vec<String>>(&allowed_json)
+            && !allowed.is_empty()
+        {
+            let origin_allowed = allowed.iter().any(|pattern| {
+                if pattern.contains('*') {
+                    let re_pattern = pattern.replace('.', "\\.").replace('*', ".*");
+                    regex::Regex::new(&re_pattern)
+                        .map(|re| re.is_match(origin))
+                        .unwrap_or(false)
+                } else {
+                    origin == pattern
                 }
+            });
+            if !origin_allowed {
+                return Err((StatusCode::FORBIDDEN, "Origin not allowed".into()));
             }
         }
     }
@@ -102,11 +102,11 @@ async fn ingest_envelope(
     let event_id = extract_event_id(&data)
         .unwrap_or_else(generate_event_id);
 
-    // Store raw envelope
+    // Store raw envelope (use key.project_id, not URL param, as source of truth)
     sqlx::query(
         "INSERT OR IGNORE INTO event_envelopes (project_id, event_id, body, state) VALUES (?, ?, ?, 'pending')"
     )
-    .bind(project_id)
+    .bind(key.project_id)
     .bind(&event_id)
     .bind(&data)
     .execute(state.db.writer())
@@ -117,7 +117,7 @@ async fn ingest_envelope(
     let envelope_id: Option<(i64,)> = sqlx::query_as(
         "SELECT id FROM event_envelopes WHERE project_id = ? AND event_id = ?"
     )
-    .bind(project_id)
+    .bind(key.project_id)
     .bind(&event_id)
     .fetch_optional(state.db.reader())
     .await

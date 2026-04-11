@@ -103,8 +103,8 @@ impl DbPool {
 
             // WAL fix allowlist: >= 3.51.3 OR (>= 3.50.7 AND < 3.51.0) OR (>= 3.44.6 AND < 3.45.0)
             let wal_safe = ver >= 3_051_003
-                || (ver >= 3_050_007 && ver < 3_051_000)
-                || (ver >= 3_044_006 && ver < 3_045_000);
+                || (3_050_007..3_051_000).contains(&ver)
+                || (3_044_006..3_045_000).contains(&ver);
 
             if !wal_safe {
                 warn!(
@@ -184,10 +184,8 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
         }
         current.push_str(line);
 
-        if upper.starts_with("END") || upper.starts_with("END;") {
-            if depth > 0 {
-                depth -= 1;
-            }
+        if (upper.starts_with("END") || upper.starts_with("END;")) && depth > 0 {
+            depth -= 1;
         }
 
         // Only split on `;` when not inside a BEGIN...END block

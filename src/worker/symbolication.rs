@@ -17,7 +17,7 @@ static SM_CACHE: Lazy<Mutex<LruCache<String, Arc<SourceMap>>>> =
 pub async fn symbolicate_event(
     event: &mut SentryEvent,
     db: &DbPool,
-    artifacts_dir: &str,
+    _artifacts_dir: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // 1. Check if event has a release field
     let release_version = match &event.release {

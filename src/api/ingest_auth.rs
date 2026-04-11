@@ -27,31 +27,28 @@ where
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         // 1. X-Sentry-Auth header
-        if let Some(val) = parts.headers.get("x-sentry-auth") {
-            if let Ok(s) = val.to_str() {
-                if let Some(auth) = parse_sentry_auth(s) {
-                    return Ok(auth);
-                }
-            }
+        if let Some(val) = parts.headers.get("x-sentry-auth")
+            && let Ok(s) = val.to_str()
+            && let Some(auth) = parse_sentry_auth(s)
+        {
+            return Ok(auth);
         }
 
         // 2. Authorization header
-        if let Some(val) = parts.headers.get("authorization") {
-            if let Ok(s) = val.to_str() {
-                if s.starts_with("Sentry ") || s.starts_with("DSN ") {
-                    if let Some(auth) = parse_sentry_auth(s) {
-                        return Ok(auth);
-                    }
-                }
-                if let Some(encoded) = s.strip_prefix("Basic ") {
-                    if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded.trim()) {
-                        if let Ok(text) = String::from_utf8(decoded) {
-                            if let Some((key, _)) = text.split_once(':') {
-                                return Ok(SentryAuth { sentry_key: key.to_string() });
-                            }
-                        }
-                    }
-                }
+        if let Some(val) = parts.headers.get("authorization")
+            && let Ok(s) = val.to_str()
+        {
+            if (s.starts_with("Sentry ") || s.starts_with("DSN "))
+                && let Some(auth) = parse_sentry_auth(s)
+            {
+                return Ok(auth);
+            }
+            if let Some(encoded) = s.strip_prefix("Basic ")
+                && let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded.trim())
+                && let Ok(text) = String::from_utf8(decoded)
+                && let Some((key, _)) = text.split_once(':')
+            {
+                return Ok(SentryAuth { sentry_key: key.to_string() });
             }
         }
 
@@ -76,10 +73,10 @@ fn parse_sentry_auth(header: &str) -> Option<SentryAuth> {
 
     for pair in content.split(',') {
         let pair = pair.trim();
-        if let Some((k, v)) = pair.split_once('=') {
-            if k.trim() == "sentry_key" {
-                return Some(SentryAuth { sentry_key: v.trim().to_string() });
-            }
+        if let Some((k, v)) = pair.split_once('=')
+            && k.trim() == "sentry_key"
+        {
+            return Some(SentryAuth { sentry_key: v.trim().to_string() });
         }
     }
     None

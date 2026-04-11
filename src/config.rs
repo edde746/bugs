@@ -20,6 +20,8 @@ pub struct Config {
     #[serde(default)]
     pub sqlite: SqliteConfig,
     #[serde(default)]
+    pub public_url: Option<String>,
+    #[serde(default)]
     pub ingest: IngestConfig,
 }
 
@@ -103,6 +105,7 @@ fn default_max_items_per_envelope() -> usize { 100 }
 fn default_max_tag_values_per_key() -> u32 { 1000 }
 
 impl Config {
+    #[allow(clippy::result_large_err)]
     pub fn load() -> Result<Self, figment::Error> {
         Figment::from(Serialized::defaults(Config::default()))
             .merge(Toml::file("bugs.toml"))
@@ -120,6 +123,7 @@ impl Default for Config {
             retention_days: default_retention_days(),
             envelope_retention_hours: default_envelope_retention_hours(),
             worker_threads: default_worker_threads(),
+            public_url: None,
             auth: AuthConfig::default(),
             sqlite: SqliteConfig::default(),
             ingest: IngestConfig::default(),

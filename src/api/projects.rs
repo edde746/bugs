@@ -2,7 +2,7 @@ use axum::{
     Router, Json,
     extract::{Path, State},
     http::StatusCode,
-    routing::{get, post, delete},
+    routing::{get, delete},
 };
 
 use crate::AppState;
@@ -118,9 +118,22 @@ async fn list_keys(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Enrich with DSN
-    let host = "localhost:9000"; // TODO: derive from config/request
+    let (scheme, host) = if let Some(ref url) = state.config.public_url {
+        if let Ok(parsed) = url::Url::parse(url) {
+            let s = parsed.scheme().to_string();
+            let h = match parsed.port() {
+                Some(p) => format!("{}:{}", parsed.host_str().unwrap_or("localhost"), p),
+                None => parsed.host_str().unwrap_or("localhost").to_string(),
+            };
+            (s, h)
+        } else {
+            ("http".to_string(), state.config.bind_address.clone())
+        }
+    } else {
+        ("http".to_string(), state.config.bind_address.clone())
+    };
     let enriched: Vec<serde_json::Value> = keys.iter().map(|k| {
-        let dsn = build_dsn("http", host, &k.public_key, k.project_id);
+        let dsn = build_dsn(&scheme, &host, &k.public_key, k.project_id);
         serde_json::json!({
             "id": k.id,
             "project_id": k.project_id,

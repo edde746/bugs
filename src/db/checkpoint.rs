@@ -26,7 +26,7 @@ impl CheckpointManager {
     /// Record a processed batch; returns true if a checkpoint should run
     pub fn record_batch(&self) -> bool {
         let count = self.batch_count.fetch_add(1, Ordering::Relaxed) + 1;
-        count % self.checkpoint_interval == 0
+        count.is_multiple_of(self.checkpoint_interval)
     }
 
     pub async fn passive_checkpoint(&self) {

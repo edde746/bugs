@@ -1,4 +1,5 @@
 use axum::{Router, Json, extract::{Path, Query, State}, http::StatusCode, routing::get};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Deserialize;
 use crate::AppState;
 use crate::models::issue::*;
@@ -13,13 +14,31 @@ pub fn routes() -> Router<AppState> {
 struct IssueQuery {
     status: Option<String>,
     sort: Option<String>,
-    cursor: Option<i64>,
+    cursor: Option<String>,
+    #[allow(dead_code)]
     query: Option<String>,
     #[serde(default = "default_limit")]
     limit: i64,
 }
 
 fn default_limit() -> i64 { 25 }
+
+#[derive(Deserialize, serde::Serialize)]
+struct CursorData {
+    v: String,
+    id: i64,
+}
+
+fn decode_cursor(cursor: &str) -> Option<CursorData> {
+    let bytes = URL_SAFE_NO_PAD.decode(cursor).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn encode_cursor(sort_value: &str, id: i64) -> String {
+    let data = CursorData { v: sort_value.to_string(), id };
+    let json = serde_json::to_vec(&data).unwrap();
+    URL_SAFE_NO_PAD.encode(&json)
+}
 
 async fn list_issues(
     State(state): State<AppState>,
@@ -43,26 +62,56 @@ async fn list_issues(
         _ => "last_seen",
     };
 
-    let cursor = params.cursor.unwrap_or(0);
-
-    let issues: Vec<Issue> = sqlx::query_as(&format!(
-        "SELECT * FROM issues WHERE project_id = ? AND status = ? AND id > ? ORDER BY {sort_col} DESC LIMIT ?"
-    ))
-    .bind(project_id)
-    .bind(status)
-    .bind(cursor)
-    .bind(params.limit + 1)
-    .fetch_all(state.db.reader())
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let issues: Vec<Issue> = if let Some(ref cursor_str) = params.cursor {
+        if let Some(cursor) = decode_cursor(cursor_str) {
+            sqlx::query_as(&format!(
+                "SELECT * FROM issues WHERE project_id = ? AND status = ? \
+                 AND ({sort_col} < ? OR ({sort_col} = ? AND id < ?)) \
+                 ORDER BY {sort_col} DESC, id DESC LIMIT ?"
+            ))
+            .bind(project_id)
+            .bind(status)
+            .bind(&cursor.v)
+            .bind(&cursor.v)
+            .bind(cursor.id)
+            .bind(params.limit + 1)
+            .fetch_all(state.db.reader())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        } else {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    } else {
+        sqlx::query_as(&format!(
+            "SELECT * FROM issues WHERE project_id = ? AND status = ? \
+             ORDER BY {sort_col} DESC, id DESC LIMIT ?"
+        ))
+        .bind(project_id)
+        .bind(status)
+        .bind(params.limit + 1)
+        .fetch_all(state.db.reader())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    };
 
     let has_next = issues.len() as i64 > params.limit;
     let items: Vec<&Issue> = issues.iter().take(params.limit as usize).collect();
-    let next_cursor = items.last().map(|i| i.id);
+    let next_cursor = if has_next {
+        items.last().map(|i| {
+            let sort_value = match sort_col {
+                "first_seen" => &i.first_seen,
+                "event_count" => return encode_cursor(&i.event_count.to_string(), i.id),
+                _ => &i.last_seen,
+            };
+            encode_cursor(sort_value, i.id)
+        })
+    } else {
+        None
+    };
 
     Ok(Json(serde_json::json!({
         "issues": items,
-        "nextCursor": if has_next { next_cursor } else { None },
+        "nextCursor": next_cursor,
     })))
 }
 

@@ -44,7 +44,7 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
   };
 
   const collapseAll = () => {
-    setExpandedFrames(new Set());
+    setExpandedFrames(new Set<number>());
     setAllExpanded(false);
   };
 

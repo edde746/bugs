@@ -1,8 +1,8 @@
-/// Integration tests for the ingest pipeline.
-/// Run with: cargo test --test ingest_test
-///
-/// These tests start a full server, send events via HTTP, and verify
-/// they are processed correctly.
+//! Integration tests for the ingest pipeline.
+//! Run with: cargo test --test ingest_test
+//!
+//! These tests start a full server, send events via HTTP, and verify
+//! they are processed correctly.
 
 use std::time::Duration;
 
@@ -84,11 +84,12 @@ async fn test_envelope_ingest_and_processing() {
 
     // Verify event was stored
     let issue_id = issue_list[0]["id"].as_i64().unwrap();
-    let events: Vec<serde_json::Value> = client
+    let events_resp: serde_json::Value = client
         .get(format!("{base_url}/api/internal/issues/{issue_id}/events"))
         .send().await.unwrap()
         .json().await.unwrap();
 
+    let events = events_resp["events"].as_array().unwrap();
     assert_eq!(events.len(), 1);
     assert_eq!(events[0]["event_id"].as_str().unwrap(), event_id);
 }
@@ -200,11 +201,12 @@ async fn test_search() {
 
     tokio::time::sleep(Duration::from_secs(2)).await;
 
-    let results: Vec<serde_json::Value> = client
+    let search_resp: serde_json::Value = client
         .get(format!("{base_url}/api/internal/search?q=UniqueSearchableMessage12345&project={pid}"))
         .send().await.unwrap()
         .json().await.unwrap();
 
+    let results = search_resp["results"].as_array().unwrap();
     assert!(!results.is_empty(), "FTS5 search should find the event");
 }
 

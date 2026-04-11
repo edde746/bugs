@@ -34,15 +34,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Arc::new(config);
 
     // Safety check: no admin token + non-loopback -> require flag
-    if config.auth.admin_token.is_empty() && !is_loopback_address(&config.bind_address) {
-        if !cli.insecure_open_admin {
-            eprintln!(
-                "ERROR: No admin_token configured and bind address '{}' is not loopback.\n\
-                 Either set auth.admin_token, bind to 127.0.0.1, or pass --insecure-open-admin",
-                config.bind_address
-            );
-            std::process::exit(1);
-        }
+    if config.auth.admin_token.is_empty()
+        && !is_loopback_address(&config.bind_address)
+        && !cli.insecure_open_admin
+    {
+        eprintln!(
+            "ERROR: No admin_token configured and bind address '{}' is not loopback.\n\
+             Either set auth.admin_token, bind to 127.0.0.1, or pass --insecure-open-admin",
+            config.bind_address
+        );
+        std::process::exit(1);
     }
 
     info!(bind = %config.bind_address, db = %config.database_path, "Starting Bugs");
@@ -72,25 +73,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rate_limiter: bugs::ingest::abuse::RateLimiter::new(),
     };
 
-    let admin_token = config.auth.admin_token.clone();
     let app = bugs::api::router(&state)
         .route("/health", axum::routing::get(|| async { "ok" }))
-        .layer(axum::middleware::from_fn(move |request: axum::extract::Request, next: axum::middleware::Next| {
-            let token = admin_token.clone();
-            async move {
-                let path = request.uri().path().to_string();
-                let needs_auth = path.starts_with("/api/internal") || path.starts_with("/api/0");
-                if !needs_auth || token.is_empty() {
-                    return Ok::<_, axum::http::StatusCode>(next.run(request).await);
-                }
-                let auth_ok = request.headers()
-                    .get(axum::http::header::AUTHORIZATION)
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|h| h.strip_prefix("Bearer "))
-                    .is_some_and(|bearer| bearer.trim() == token);
-                if auth_ok { Ok(next.run(request).await) } else { Err(axum::http::StatusCode::UNAUTHORIZED) }
-            }
-        }))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .layer(tower_http::compression::CompressionLayer::new())
         .layer(tower_http::cors::CorsLayer::permissive())

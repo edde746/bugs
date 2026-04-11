@@ -43,46 +43,46 @@ pub async fn index_event(
     if let Some(server_name) = &event.server_name {
         tags.push(("server_name".to_string(), server_name.clone()));
     }
-    if let Some(logger) = &event.logger {
-        if !logger.is_empty() {
-            tags.push(("logger".to_string(), logger.clone()));
-        }
+    if let Some(logger) = &event.logger
+        && !logger.is_empty()
+    {
+        tags.push(("logger".to_string(), logger.clone()));
     }
 
     // Auto-tags from contexts: browser, os, url
     if let Some(contexts) = &event.contexts {
-        if let Some(browser) = contexts.get("browser") {
-            if let Some(name) = browser.get("name").and_then(|v| v.as_str()) {
-                let version = browser
-                    .get("version")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                if version.is_empty() {
-                    tags.push(("browser".to_string(), name.to_string()));
-                } else {
-                    tags.push(("browser".to_string(), format!("{name} {version}")));
-                }
-                tags.push(("browser.name".to_string(), name.to_string()));
+        if let Some(browser) = contexts.get("browser")
+            && let Some(name) = browser.get("name").and_then(|v| v.as_str())
+        {
+            let version = browser
+                .get("version")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if version.is_empty() {
+                tags.push(("browser".to_string(), name.to_string()));
+            } else {
+                tags.push(("browser".to_string(), format!("{name} {version}")));
             }
+            tags.push(("browser.name".to_string(), name.to_string()));
         }
-        if let Some(os) = contexts.get("os") {
-            if let Some(name) = os.get("name").and_then(|v| v.as_str()) {
-                let version = os.get("version").and_then(|v| v.as_str()).unwrap_or("");
-                if version.is_empty() {
-                    tags.push(("os".to_string(), name.to_string()));
-                } else {
-                    tags.push(("os".to_string(), format!("{name} {version}")));
-                }
-                tags.push(("os.name".to_string(), name.to_string()));
+        if let Some(os) = contexts.get("os")
+            && let Some(name) = os.get("name").and_then(|v| v.as_str())
+        {
+            let version = os.get("version").and_then(|v| v.as_str()).unwrap_or("");
+            if version.is_empty() {
+                tags.push(("os".to_string(), name.to_string()));
+            } else {
+                tags.push(("os".to_string(), format!("{name} {version}")));
             }
+            tags.push(("os.name".to_string(), name.to_string()));
         }
     }
 
     // Auto-tag from request URL
-    if let Some(request) = &event.request {
-        if let Some(url) = request.get("url").and_then(|v| v.as_str()) {
-            tags.push(("url".to_string(), url.to_string()));
-        }
+    if let Some(request) = &event.request
+        && let Some(url) = request.get("url").and_then(|v| v.as_str())
+    {
+        tags.push(("url".to_string(), url.to_string()));
     }
 
     // Auto-tag from user
@@ -199,12 +199,11 @@ fn extract_tags_from_value(val: &serde_json::Value, tags: &mut Vec<(String, Stri
         }
         serde_json::Value::Array(arr) => {
             for item in arr {
-                if let serde_json::Value::Array(pair) = item {
-                    if pair.len() == 2 {
-                        if let (Some(k), Some(v)) = (pair[0].as_str(), pair[1].as_str()) {
-                            tags.push((k.to_string(), v.to_string()));
-                        }
-                    }
+                if let serde_json::Value::Array(pair) = item
+                    && pair.len() == 2
+                    && let (Some(k), Some(v)) = (pair[0].as_str(), pair[1].as_str())
+                {
+                    tags.push((k.to_string(), v.to_string()));
                 }
             }
         }

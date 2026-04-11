@@ -1,7 +1,8 @@
 use std::io::Read;
 
-use axum::{Router, Json, extract::{Path, State, Multipart}, http::StatusCode, routing::{get, post}};
+use axum::{Router, Json, extract::{Path, Query, State, Multipart}, http::StatusCode, routing::{get, post}};
 use flate2::read::GzDecoder;
+use serde::{Deserialize, Serialize};
 use sha2::{Sha256, Digest};
 use tracing::warn;
 
@@ -15,18 +16,80 @@ pub fn routes() -> Router<AppState> {
         .route("/api/0/projects/{org}/{project}/releases/{version}/files/", post(upload_release_file).get(list_release_files))
 }
 
+#[derive(Deserialize)]
+struct ReleaseQuery {
+    project: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReleaseResponse {
+    version: String,
+    date_created: String,
+    date_released: Option<String>,
+    short_version: String,
+    new_groups: i64,
+}
+
+fn make_short_version(version: &str) -> String {
+    if let Some(pos) = version.rfind('@') {
+        version[pos + 1..].to_string()
+    } else if version.len() > 12 {
+        version[version.len() - 12..].to_string()
+    } else {
+        version.to_string()
+    }
+}
+
 async fn list_releases(
     State(state): State<AppState>,
     Path(_org): Path<String>,
-) -> Result<Json<Vec<Release>>, StatusCode> {
-    let releases: Vec<Release> = sqlx::query_as(
-        "SELECT * FROM releases WHERE org_id = 1 ORDER BY created_at DESC LIMIT 100"
-    )
-    .fetch_all(state.db.reader())
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Query(params): Query<ReleaseQuery>,
+) -> Result<Json<Vec<ReleaseResponse>>, StatusCode> {
+    let releases: Vec<Release> = if let Some(ref project) = params.project {
+        // Resolve project slug or id
+        let project_id: Option<i64> = if let Ok(id) = project.parse::<i64>() {
+            Some(id)
+        } else {
+            let row: Option<(i64,)> = sqlx::query_as("SELECT id FROM projects WHERE slug = ?")
+                .bind(project)
+                .fetch_optional(state.db.reader())
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            row.map(|r| r.0)
+        };
+        if let Some(pid) = project_id {
+            sqlx::query_as(
+                "SELECT r.* FROM releases r \
+                 JOIN release_projects rp ON rp.release_id = r.id \
+                 WHERE r.org_id = 1 AND rp.project_id = ? \
+                 ORDER BY r.created_at DESC LIMIT 100"
+            )
+            .bind(pid)
+            .fetch_all(state.db.reader())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        } else {
+            Vec::new()
+        }
+    } else {
+        sqlx::query_as(
+            "SELECT * FROM releases WHERE org_id = 1 ORDER BY created_at DESC LIMIT 100"
+        )
+        .fetch_all(state.db.reader())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    };
 
-    Ok(Json(releases))
+    let response: Vec<ReleaseResponse> = releases.iter().map(|r| ReleaseResponse {
+        version: r.version.clone(),
+        date_created: r.created_at.clone(),
+        date_released: None,
+        short_version: make_short_version(&r.version),
+        new_groups: 0,
+    }).collect();
+
+    Ok(Json(response))
 }
 
 async fn create_release(
@@ -163,8 +226,7 @@ async fn upload_release_file(
     // Sanitize name for filesystem path
     let sanitized_name = artifact_name
         .replace("~/", "")
-        .replace('/', "_")
-        .replace('\\', "_");
+        .replace(['/', '\\'], "_");
 
     // Build file path
     let org_id: i64 = 1;

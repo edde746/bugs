@@ -33,7 +33,7 @@ export interface Issue {
 
 export interface IssueListResponse {
   issues: Issue[];
-  nextCursor: number | null;
+  nextCursor: string | null;
 }
 
 export interface Event {

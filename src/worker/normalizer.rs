@@ -10,10 +10,10 @@ pub fn normalize(event: &mut SentryEvent) {
     }
 
     // Normalize timestamp
-    if let Some(ts) = &event.timestamp {
-        if let Some(parsed) = parse_timestamp(ts) {
-            event.timestamp = Some(serde_json::Value::String(parsed));
-        }
+    if let Some(ts) = &event.timestamp
+        && let Some(parsed) = parse_timestamp(ts)
+    {
+        event.timestamp = Some(serde_json::Value::String(parsed));
     }
     if event.timestamp.is_none() {
         event.timestamp = Some(serde_json::Value::String(now_iso()));

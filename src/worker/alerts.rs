@@ -30,13 +30,13 @@ pub async fn evaluate_alerts(
 
     for rule in &rules {
         // 2a. Check cooldown
-        if let Some(ref last_fired) = rule.last_fired {
-            if let Ok(fired_at) = chrono::DateTime::parse_from_rfc3339(last_fired) {
-                let elapsed = now.signed_duration_since(fired_at).num_seconds();
-                if elapsed < rule.frequency {
-                    debug!(rule_id = rule.id, "Alert rule still in cooldown, skipping");
-                    continue;
-                }
+        if let Some(ref last_fired) = rule.last_fired
+            && let Ok(fired_at) = chrono::DateTime::parse_from_rfc3339(last_fired)
+        {
+            let elapsed = now.signed_duration_since(fired_at).num_seconds();
+            if elapsed < rule.frequency {
+                debug!(rule_id = rule.id, "Alert rule still in cooldown, skipping");
+                continue;
             }
         }
 

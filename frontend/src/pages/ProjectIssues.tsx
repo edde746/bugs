@@ -52,7 +52,7 @@ export default function ProjectIssues() {
   const toggleSelectAll = () => {
     const issues = issuesQuery.data?.issues ?? [];
     if (selectedIssues().size === issues.length) {
-      setSelectedIssues(new Set());
+      setSelectedIssues(new Set<number>());
     } else {
       setSelectedIssues(new Set(issues.map((i) => i.id)));
     }
