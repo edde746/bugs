@@ -7,7 +7,7 @@ COPY frontend/ ./
 RUN bun run build
 
 # Stage 2: Build Rust binary
-FROM rust:1.85-alpine AS rust-builder
+FROM rust:1.94-alpine AS rust-builder
 RUN apk add --no-cache musl-dev
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
