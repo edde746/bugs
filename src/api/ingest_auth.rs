@@ -1,0 +1,86 @@
+use axum::extract::FromRequestParts;
+use axum::http::request::Parts;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use base64::Engine;
+
+/// Extracted Sentry auth info from ingest requests
+#[derive(Debug)]
+pub struct SentryAuth {
+    pub sentry_key: String,
+}
+
+#[derive(Debug)]
+pub struct SentryAuthRejection(String);
+
+impl IntoResponse for SentryAuthRejection {
+    fn into_response(self) -> Response {
+        (StatusCode::UNAUTHORIZED, self.0).into_response()
+    }
+}
+
+impl<S> FromRequestParts<S> for SentryAuth
+where
+    S: Send + Sync,
+{
+    type Rejection = SentryAuthRejection;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        // 1. X-Sentry-Auth header
+        if let Some(val) = parts.headers.get("x-sentry-auth") {
+            if let Ok(s) = val.to_str() {
+                if let Some(auth) = parse_sentry_auth(s) {
+                    return Ok(auth);
+                }
+            }
+        }
+
+        // 2. Authorization header
+        if let Some(val) = parts.headers.get("authorization") {
+            if let Ok(s) = val.to_str() {
+                if s.starts_with("Sentry ") || s.starts_with("DSN ") {
+                    if let Some(auth) = parse_sentry_auth(s) {
+                        return Ok(auth);
+                    }
+                }
+                if let Some(encoded) = s.strip_prefix("Basic ") {
+                    if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded.trim()) {
+                        if let Ok(text) = String::from_utf8(decoded) {
+                            if let Some((key, _)) = text.split_once(':') {
+                                return Ok(SentryAuth { sentry_key: key.to_string() });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Query parameter
+        if let Some(query) = parts.uri.query() {
+            for pair in query.split('&') {
+                if let Some(key) = pair.strip_prefix("sentry_key=") {
+                    return Ok(SentryAuth { sentry_key: key.to_string() });
+                }
+            }
+        }
+
+        Err(SentryAuthRejection("Missing Sentry authentication".into()))
+    }
+}
+
+fn parse_sentry_auth(header: &str) -> Option<SentryAuth> {
+    let content = header
+        .trim_start_matches("Sentry ")
+        .trim_start_matches("DSN ")
+        .trim_start_matches("sentry ");
+
+    for pair in content.split(',') {
+        let pair = pair.trim();
+        if let Some((k, v)) = pair.split_once('=') {
+            if k.trim() == "sentry_key" {
+                return Some(SentryAuth { sentry_key: v.trim().to_string() });
+            }
+        }
+    }
+    None
+}

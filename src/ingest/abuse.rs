@@ -1,0 +1,51 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use std::time::Instant;
+
+/// In-memory sliding window rate limiter
+#[derive(Clone)]
+pub struct RateLimiter {
+    windows: Arc<Mutex<HashMap<String, RateWindow>>>,
+}
+
+struct RateWindow {
+    count: u64,
+    window_start: Instant,
+}
+
+impl RateLimiter {
+    pub fn new() -> Self {
+        Self {
+            windows: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Check if a key is rate-limited. Returns true if allowed.
+    pub async fn check(&self, key: &str, limit_per_min: u64) -> bool {
+        if limit_per_min == 0 {
+            return true;
+        }
+
+        let mut windows = self.windows.lock().await;
+        let now = Instant::now();
+
+        let window = windows.entry(key.to_string()).or_insert(RateWindow {
+            count: 0,
+            window_start: now,
+        });
+
+        // Reset window if it's been more than 60 seconds
+        if now.duration_since(window.window_start).as_secs() >= 60 {
+            window.count = 0;
+            window.window_start = now;
+        }
+
+        if window.count >= limit_per_min {
+            return false;
+        }
+
+        window.count += 1;
+        true
+    }
+}
