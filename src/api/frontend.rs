@@ -38,7 +38,7 @@ async fn serve_spa() -> impl IntoResponse {
         None => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, "text/html".to_string())],
-            "<html><body><h1>Bugs</h1><p>Frontend not built. Run: cd frontend && npm run build</p></body></html>".as_bytes().to_vec(),
+            "<html><body><h1>Bugs</h1><p>Frontend not built. Run: cd frontend && bun run build</p></body></html>".as_bytes().to_vec(),
         ).into_response(),
     }
 }

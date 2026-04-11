@@ -17,7 +17,7 @@ docker run -p 9000:9000 -v bugs-data:/data bugs
 
 ```bash
 # Build frontend
-cd frontend && npm ci && npm run build && cd ..
+cd frontend && bun install --frozen-lockfile && bun run build && cd ..
 
 # Build and run
 cargo build --release
@@ -98,7 +98,7 @@ The DSN is shown in project settings after creating a project.
 cargo watch -x run
 
 # Frontend dev server (proxies /api to localhost:9000)
-cd frontend && npm run dev
+cd frontend && bun run dev
 ```
 
 ## License
