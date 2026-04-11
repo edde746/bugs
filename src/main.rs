@@ -1,6 +1,8 @@
 use std::sync::Arc;
+use axum::http::header;
 use clap::Parser;
 use tokio::sync::mpsc;
+use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::info;
 
 use bugs::config::Config;
@@ -77,7 +79,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/health", axum::routing::get(|| async { "ok" }))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .layer(tower_http::compression::CompressionLayer::new())
-        .layer(tower_http::cors::CorsLayer::permissive())
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            header::HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_FRAME_OPTIONS,
+            header::HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::HeaderName::from_static("x-xss-protection"),
+            header::HeaderValue::from_static("1; mode=block"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CONTENT_SECURITY_POLICY,
+            header::HeaderValue::from_static(
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+            ),
+        ))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&config.bind_address).await?;
