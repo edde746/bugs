@@ -38,7 +38,7 @@ Configuration is loaded from (highest precedence first):
 
 | Variable | TOML key | Default | Description |
 |----------|----------|---------|-------------|
-| `BUGS_BIND_ADDRESS` | `bind_address` | `127.0.0.1:9000` | Listen address |
+| `BUGS_BIND_ADDRESS` | `bind_address` | `0.0.0.0:9000` | Listen address |
 | `BUGS_DATABASE_PATH` | `database_path` | `./data/bugs.db` | SQLite database path |
 | `BUGS_ARTIFACTS_DIR` | `artifacts_dir` | `./data/artifacts` | Release file storage |
 | `BUGS_RETENTION_DAYS` | `retention_days` | `90` | Days to keep events |
@@ -71,9 +71,7 @@ Configuration is loaded from (highest precedence first):
 
 ### Admin API
 
-When binding to a non-loopback address, set `BUGS_AUTH_ADMIN_TOKEN` to secure the management API. Requests must include `Authorization: Bearer <token>`.
-
-If you intentionally want to run without a token on a non-loopback address, pass `--insecure-open-admin`.
+Set `BUGS_AUTH_ADMIN_TOKEN` to secure the management API. Requests must include `Authorization: Bearer <token>`. If no token is configured, the management API is open — a warning is logged at startup.
 
 ### Ingest
 

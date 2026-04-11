@@ -24,6 +24,5 @@ RUN mkdir -p /data/artifacts
 VOLUME /data
 ENV BUGS_DATABASE_PATH=/data/bugs.db
 ENV BUGS_ARTIFACTS_DIR=/data/artifacts
-ENV BUGS_BIND_ADDRESS=0.0.0.0:9000
 EXPOSE 9000
 ENTRYPOINT ["bugs"]

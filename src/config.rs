@@ -86,7 +86,7 @@ impl Default for IngestConfig {
     }
 }
 
-fn default_bind_address() -> String { "127.0.0.1:9000".to_string() }
+fn default_bind_address() -> String { "0.0.0.0:9000".to_string() }
 fn default_database_path() -> String { "./data/bugs.db".to_string() }
 fn default_artifacts_dir() -> String { "./data/artifacts".to_string() }
 fn default_retention_days() -> u32 { 90 }

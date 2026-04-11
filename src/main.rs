@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use axum::http::header;
-use clap::Parser;
 use tokio::sync::mpsc;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::info;
@@ -10,18 +9,8 @@ use bugs::db::DbPool;
 use bugs::db::checkpoint::CheckpointManager;
 use bugs::AppState;
 
-#[derive(clap::Parser)]
-#[command(name = "bugs", about = "Lightweight Sentry-compatible error tracker")]
-struct Cli {
-    /// Allow running without an admin token on non-loopback addresses.
-    #[arg(long)]
-    insecure_open_admin: bool,
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = Cli::parse();
-
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -35,17 +24,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let config = Arc::new(config);
 
-    // Safety check: no admin token + non-loopback -> require flag
-    if config.auth.admin_token.is_empty()
-        && !is_loopback_address(&config.bind_address)
-        && !cli.insecure_open_admin
-    {
-        eprintln!(
-            "ERROR: No admin_token configured and bind address '{}' is not loopback.\n\
-             Either set auth.admin_token, bind to 127.0.0.1, or pass --insecure-open-admin",
-            config.bind_address
+    // Warn if no admin token on a non-loopback address
+    if config.auth.admin_token.is_empty() && !is_loopback_address(&config.bind_address) {
+        tracing::warn!(
+            address = %config.bind_address,
+            "No admin_token configured on a non-loopback address — management API is unauthenticated"
         );
-        std::process::exit(1);
     }
 
     info!(bind = %config.bind_address, db = %config.database_path, "Starting Bugs");
