@@ -8,12 +8,13 @@ RUN bun run build
 
 # Stage 2: Build Rust binary
 FROM rust:1.94-alpine AS rust-builder
-RUN apk add --no-cache musl-dev
+RUN apk add --no-cache musl-dev sqlite-dev sqlite-static
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src/ ./src/
 COPY migrations/ ./migrations/
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist/
+ENV LIBSQLITE3_SYS_USE_PKG_CONFIG=1
 RUN cargo build --release
 
 # Stage 3: Final image

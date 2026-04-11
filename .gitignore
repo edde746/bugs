@@ -2,6 +2,7 @@
 /data
 /frontend/dist
 /frontend/node_modules
+/.cargo/config.toml
 *.db
 *.db-wal
 *.db-shm

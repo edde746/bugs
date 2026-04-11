@@ -11,14 +11,14 @@
   },
   "dependencies": {
     "@solidjs/router": "^0.16.1",
-    "@tanstack/solid-query": "^5.97.0",
+    "@tanstack/solid-query": "^5.99.0",
     "solid-js": "^1.9.12",
     "uplot": "^1.6.32"
   },
   "devDependencies": {
-    "@iconify-json/lucide": "^1.2.45",
+    "@iconify-json/lucide": "^1.2.102",
     "typescript": "^6.0.2",
-    "unplugin-icons": "^22.1.0",
+    "unplugin-icons": "^23.0.1",
     "vite": "^8.0.8",
     "vite-plugin-solid": "^2.11.12"
   }
