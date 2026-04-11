@@ -13,8 +13,11 @@ import ExceptionDisplay from "~/components/events/ExceptionDisplay";
 import BreadcrumbsTimeline from "~/components/events/BreadcrumbsTimeline";
 import ContextPanels from "~/components/events/ContextPanels";
 import TagsTable from "~/components/events/TagsTable";
+import CopyButton from "~/components/ui/CopyButton";
 import IconArrowLeft from "~icons/lucide/arrow-left";
 import IconArrowRight from "~icons/lucide/arrow-right";
+import type { ExceptionValue } from "~/components/events/ExceptionDisplay";
+import type { Breadcrumb } from "~/components/events/BreadcrumbsTimeline";
 
 export default function IssueDetail() {
   const params = useParams<{ project: string; issueId: string }>();
@@ -115,6 +118,180 @@ export default function IssueDetail() {
     return events ? eventIndex() < events.length - 1 : false;
   };
 
+  const buildMarkdown = (): string => {
+    const parts: string[] = [];
+    const iss = issueQuery.data;
+    if (!iss) return "";
+
+    // Issue header
+    parts.push(`# ${iss.title}`);
+    parts.push("");
+    parts.push(`- **Level:** ${iss.level}`);
+    parts.push(`- **Status:** ${STATUS_LABELS[iss.status] ?? iss.status}`);
+    if (iss.culprit) parts.push(`- **Culprit:** ${iss.culprit}`);
+    parts.push(`- **Events:** ${formatNumber(iss.event_count)}`);
+    parts.push(`- **First Seen:** ${iss.first_seen}`);
+    parts.push(`- **Last Seen:** ${iss.last_seen}`);
+
+    // Event metadata
+    const ev = currentEvent();
+    if (ev) {
+      parts.push("");
+      parts.push("## Event");
+      parts.push("");
+      parts.push(`- **Event ID:** ${ev.event_id}`);
+      parts.push(`- **Timestamp:** ${ev.timestamp}`);
+      if (ev.platform) parts.push(`- **Platform:** ${ev.platform}`);
+    }
+
+    // Exceptions + stack traces
+    const excs = exceptions() as ExceptionValue[];
+    for (const exc of excs) {
+      parts.push("");
+      parts.push(`## Exception: ${exc.type ?? "Error"}`);
+      if (exc.value) {
+        parts.push("");
+        parts.push(exc.value);
+      }
+      if (exc.mechanism) {
+        const handled = exc.mechanism.handled === false ? " (unhandled)" : "";
+        parts.push("");
+        parts.push(`- **Mechanism:** ${exc.mechanism.type ?? "generic"}${handled}`);
+      }
+      const frames = exc.stacktrace?.frames;
+      if (frames && frames.length > 0) {
+        parts.push("");
+        parts.push("### Stack Trace");
+        parts.push("");
+        parts.push("| | Function | File |");
+        parts.push("|---|---|---|");
+        const reversed = [...frames].reverse();
+        for (const frame of reversed) {
+          const tag = frame.in_app ? "app" : "";
+          const fn = frame.function ?? "<anonymous>";
+          const file = frame.filename ?? frame.abs_path ?? frame.module ?? "unknown";
+          let loc = file;
+          if (frame.lineno != null) {
+            loc += `:${frame.lineno}`;
+            if (frame.colno != null) loc += `:${frame.colno}`;
+          }
+          parts.push(`| ${tag} | ${fn} | ${loc} |`);
+        }
+      }
+    }
+
+    // Breadcrumbs
+    const crumbs = breadcrumbs() as Breadcrumb[];
+    if (crumbs.length > 0) {
+      const sorted = [...crumbs].sort((a, b) => {
+        const aTs = typeof a.timestamp === "number" ? a.timestamp : new Date(a.timestamp ?? 0).getTime() / 1000;
+        const bTs = typeof b.timestamp === "number" ? b.timestamp : new Date(b.timestamp ?? 0).getTime() / 1000;
+        return aTs - bTs;
+      });
+      parts.push("");
+      parts.push("## Breadcrumbs");
+      parts.push("");
+      parts.push("| Time | Category | Level | Message |");
+      parts.push("|---|---|---|---|");
+      for (const crumb of sorted) {
+        const ts = crumb.timestamp != null ? String(crumb.timestamp) : "";
+        const cat = crumb.category ?? "";
+        const lvl = crumb.level ?? "info";
+        const msg = crumb.message ?? "";
+        parts.push(`| ${ts} | ${cat} | ${lvl} | ${msg} |`);
+        if (crumb.data && Object.keys(crumb.data).length > 0) {
+          parts.push("");
+          parts.push("```json");
+          parts.push(JSON.stringify(crumb.data, null, 2));
+          parts.push("```");
+          parts.push("");
+        }
+      }
+    }
+
+    // Tags
+    const t = tags() as Array<{ key: string; value: string }>;
+    if (t.length > 0) {
+      parts.push("");
+      parts.push("## Tags");
+      parts.push("");
+      parts.push("| Key | Value |");
+      parts.push("|---|---|");
+      for (const tag of t) {
+        parts.push(`| ${tag.key} | ${tag.value} |`);
+      }
+    }
+
+    // Context panels (same ordering as ContextPanels.tsx)
+    const u = user() as Record<string, unknown> | null;
+    if (u && Object.keys(u).length > 0) {
+      parts.push("");
+      parts.push("## User");
+      parts.push("");
+      parts.push("| Key | Value |");
+      parts.push("|---|---|");
+      for (const [key, value] of Object.entries(u)) {
+        parts.push(`| ${key} | ${typeof value === "object" ? JSON.stringify(value) : String(value ?? "")} |`);
+      }
+    }
+
+    const ctx = contexts() as Record<string, Record<string, unknown>>;
+    if (ctx) {
+      const order = ["browser", "os", "device", "runtime"];
+      const rendered = new Set<string>();
+      const renderContext = (key: string, data: Record<string, unknown>) => {
+        if (rendered.has(key) || Object.keys(data).length === 0) return;
+        rendered.add(key);
+        const label = key.charAt(0).toUpperCase() + key.slice(1);
+        parts.push("");
+        parts.push(`## ${label}`);
+        parts.push("");
+        parts.push("| Key | Value |");
+        parts.push("|---|---|");
+        for (const [k, v] of Object.entries(data)) {
+          parts.push(`| ${k} | ${typeof v === "object" ? JSON.stringify(v) : String(v ?? "")} |`);
+        }
+      };
+      for (const key of order) {
+        if (ctx[key]) renderContext(key, ctx[key]);
+      }
+      for (const [key, value] of Object.entries(ctx)) {
+        if (!order.includes(key) && value) renderContext(key, value);
+      }
+    }
+
+    // Request
+    const req = request() as { method?: string; url?: string; headers?: Record<string, string>; query_string?: string; data?: unknown; env?: Record<string, string> } | null;
+    if (req) {
+      const reqEntries: [string, string][] = [];
+      if (req.method) reqEntries.push(["method", req.method]);
+      if (req.url) reqEntries.push(["url", req.url]);
+      if (req.query_string) reqEntries.push(["query_string", req.query_string]);
+      if (req.headers) {
+        for (const [hk, hv] of Object.entries(req.headers)) {
+          reqEntries.push([`header: ${hk}`, hv]);
+        }
+      }
+      if (req.env) {
+        for (const [ek, ev] of Object.entries(req.env)) {
+          reqEntries.push([`env: ${ek}`, ev]);
+        }
+      }
+      if (reqEntries.length > 0) {
+        parts.push("");
+        parts.push("## Request");
+        parts.push("");
+        parts.push("| Key | Value |");
+        parts.push("|---|---|");
+        for (const [k, v] of reqEntries) {
+          parts.push(`| ${k} | ${v} |`);
+        }
+      }
+    }
+
+    return parts.join("\n");
+  };
+
   return (
     <div class="page">
       <A href={`/${params.project}/issues`} class="back-link">
@@ -138,6 +315,7 @@ export default function IssueDetail() {
                 )}
               </div>
               <div class="inline-gap">
+                <CopyButton text={buildMarkdown()} label="Copy as Markdown" />
                 <Show when={issue().status !== "resolved"}>
                   <Button
                     variant="secondary"
