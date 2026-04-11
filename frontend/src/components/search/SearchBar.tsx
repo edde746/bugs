@@ -2,28 +2,14 @@ import { createSignal, Show, For, onCleanup } from "solid-js";
 import { useNavigate, useParams } from "@solidjs/router";
 import { relativeTime } from "~/lib/formatters";
 import { api } from "~/api/client";
+import type { Event as SentryEvent, SearchResponse } from "~/lib/sentry-types";
 import Badge from "~/components/ui/Badge";
-
-interface SearchResult {
-  id: number;
-  event_id: string;
-  title: string | null;
-  message: string | null;
-  level: string;
-  timestamp: string;
-  issue_id: number | null;
-  project_id: number;
-}
-
-interface SearchResponse {
-  results: SearchResult[];
-}
 
 export default function SearchBar() {
   const params = useParams<{ project?: string }>();
   const navigate = useNavigate();
   const [query, setQuery] = createSignal("");
-  const [results, setResults] = createSignal<SearchResult[]>([]);
+  const [results, setResults] = createSignal<SentryEvent[]>([]);
   const [isOpen, setIsOpen] = createSignal(false);
   const [loading, setLoading] = createSignal(false);
 
@@ -60,7 +46,7 @@ export default function SearchBar() {
     debounceTimer = setTimeout(() => doSearch(value), 300);
   };
 
-  const handleSelect = (result: SearchResult) => {
+  const handleSelect = (result: SentryEvent) => {
     setIsOpen(false);
     setQuery("");
     const project = params.project ?? "default";

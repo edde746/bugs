@@ -3,7 +3,7 @@ import { createQuery, createMutation, useQueryClient } from "@tanstack/solid-que
 import { createSignal, Show } from "solid-js";
 import { api } from "~/api/client";
 import { queryKeys } from "~/queries/keys";
-import type { Issue, Event as SentryEvent, UpdateIssueInput } from "~/lib/sentry-types";
+import type { Issue, UpdateIssueInput, EventListResponse } from "~/lib/sentry-types";
 import { relativeTime, formatNumber } from "~/lib/formatters";
 import { STATUS_LABELS, STATUS_COLORS } from "~/lib/constants";
 import Badge from "~/components/ui/Badge";
@@ -13,11 +13,6 @@ import ExceptionDisplay from "~/components/events/ExceptionDisplay";
 import BreadcrumbsTimeline from "~/components/events/BreadcrumbsTimeline";
 import ContextPanels from "~/components/events/ContextPanels";
 import TagsTable from "~/components/events/TagsTable";
-
-interface EventListResponse {
-  events: SentryEvent[];
-  nextCursor: number | null;
-}
 
 export default function IssueDetail() {
   const params = useParams<{ project: string; issueId: string }>();

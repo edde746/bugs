@@ -2,52 +2,54 @@ import { useParams } from "@solidjs/router";
 import { createQuery, createMutation, useQueryClient } from "@tanstack/solid-query";
 import { createSignal, For, Show } from "solid-js";
 import { api } from "~/api/client";
+import type { AlertRuleResponse } from "~/lib/sentry-types";
 import { relativeTime } from "~/lib/formatters";
 import Button from "~/components/ui/Button";
 import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
 import EmptyState from "~/components/ui/EmptyState";
 
-interface AlertRule {
-  id: number;
-  name: string;
-  condition_type: string;
-  webhook_url: string;
-  created_at: string;
+const CONDITION_TYPES = [
+  { value: "NewIssue", label: "New Issue" },
+  { value: "FrequencyThreshold", label: "Event Frequency" },
+  { value: "RegressionEvent", label: "Issue Regression" },
+] as const;
+
+function conditionLabel(type: string): string {
+  return CONDITION_TYPES.find((ct) => ct.value === type)?.label ?? type;
 }
 
-const CONDITION_TYPES = [
-  { value: "new_issue", label: "New Issue" },
-  { value: "event_frequency", label: "Event Frequency" },
-  { value: "issue_regression", label: "Issue Regression" },
-] as const;
+function firstWebhookUrl(rule: AlertRuleResponse): string {
+  const webhook = rule.actions.find((a) => a.type === "Webhook");
+  return webhook?.url ?? "";
+}
 
 export default function ProjectAlerts() {
   const params = useParams<{ project: string }>();
   const queryClient = useQueryClient();
 
   const [name, setName] = createSignal("");
-  const [conditionType, setConditionType] = createSignal("new_issue");
+  const [conditionType, setConditionType] = createSignal("NewIssue");
   const [webhookUrl, setWebhookUrl] = createSignal("");
   const [showForm, setShowForm] = createSignal(false);
 
   const alertsQuery = createQuery(() => ({
     queryKey: ["alerts", params.project],
     queryFn: () =>
-      api.get<AlertRule[]>(`/internal/projects/${params.project}/alerts`),
+      api.get<AlertRuleResponse[]>(`/internal/projects/${params.project}/alerts`),
   }));
 
   const createMut = createMutation(() => ({
     mutationFn: (input: {
       name: string;
-      condition_type: string;
-      webhook_url: string;
-    }) => api.post<AlertRule>(`/internal/projects/${params.project}/alerts`, input),
+      conditions: { type: string; threshold?: number; window_seconds?: number }[];
+      actions: { type: string; url?: string }[];
+    }) => api.post<AlertRuleResponse>(`/internal/projects/${params.project}/alerts`, input),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["alerts", params.project],
       });
       setName("");
-      setConditionType("new_issue");
+      setConditionType("NewIssue");
       setWebhookUrl("");
       setShowForm(false);
     },
@@ -55,10 +57,15 @@ export default function ProjectAlerts() {
 
   const handleSubmit = (e: SubmitEvent) => {
     e.preventDefault();
+    const ct = conditionType();
+    const condition: { type: string; threshold?: number; window_seconds?: number } =
+      ct === "FrequencyThreshold"
+        ? { type: ct, threshold: 1, window_seconds: 3600 }
+        : { type: ct };
     createMut.mutate({
       name: name(),
-      condition_type: conditionType(),
-      webhook_url: webhookUrl(),
+      conditions: [condition],
+      actions: [{ type: "Webhook", url: webhookUrl() }],
     });
   };
 
@@ -177,10 +184,10 @@ export default function ProjectAlerts() {
                         {rule.name}
                       </td>
                       <td class="px-4 py-3 text-sm text-[var(--color-text-secondary)]">
-                        {CONDITION_TYPES.find((ct) => ct.value === rule.condition_type)?.label ?? rule.condition_type}
+                        {rule.conditions.length > 0 ? conditionLabel(rule.conditions[0].type) : "—"}
                       </td>
                       <td class="px-4 py-3 font-mono text-xs text-[var(--color-text-secondary)]">
-                        {rule.webhook_url}
+                        {firstWebhookUrl(rule)}
                       </td>
                       <td class="px-4 py-3 text-right text-sm text-[var(--color-text-secondary)]">
                         {relativeTime(rule.created_at)}

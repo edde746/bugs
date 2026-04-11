@@ -11,6 +11,10 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn resolve_project(state: &AppState, slug: &str) -> Result<i64, (StatusCode, String)> {
+    // Accept numeric id or slug
+    if let Ok(id) = slug.parse::<i64>() {
+        return Ok(id);
+    }
     let project: Option<(i64,)> = sqlx::query_as(
         "SELECT id FROM projects WHERE slug = ?"
     )
@@ -21,53 +25,43 @@ async fn resolve_project(state: &AppState, slug: &str) -> Result<i64, (StatusCod
     Ok(project.ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?.0)
 }
 
+/// API response with parsed conditions/actions (not raw JSON strings)
 #[derive(Serialize)]
-struct FlatAlertResponse {
+struct AlertRuleResponse {
     id: i64,
+    project_id: i64,
     name: String,
-    condition_type: String,
-    webhook_url: String,
     enabled: bool,
+    conditions: Vec<AlertCondition>,
+    actions: Vec<AlertAction>,
+    frequency: i64,
+    last_fired: Option<String>,
     created_at: String,
 }
 
-fn alert_to_flat(rule: &AlertRule) -> FlatAlertResponse {
-    let condition_type = serde_json::from_str::<Vec<AlertCondition>>(&rule.conditions)
-        .ok()
-        .and_then(|c| c.first().map(condition_to_type))
+fn rule_to_response(rule: &AlertRule) -> AlertRuleResponse {
+    let conditions: Vec<AlertCondition> = serde_json::from_str(&rule.conditions)
+        .unwrap_or_default();
+    let actions: Vec<AlertAction> = serde_json::from_str(&rule.actions)
         .unwrap_or_default();
 
-    let webhook_url = serde_json::from_str::<Vec<AlertAction>>(&rule.actions)
-        .ok()
-        .and_then(|a| a.into_iter().find_map(|action| match action {
-            AlertAction::Webhook { url } => Some(url),
-            _ => None,
-        }))
-        .unwrap_or_default();
-
-    FlatAlertResponse {
+    AlertRuleResponse {
         id: rule.id,
+        project_id: rule.project_id,
         name: rule.name.clone(),
-        condition_type,
-        webhook_url,
         enabled: rule.enabled,
+        conditions,
+        actions,
+        frequency: rule.frequency,
+        last_fired: rule.last_fired.clone(),
         created_at: rule.created_at.clone(),
-    }
-}
-
-fn condition_to_type(c: &AlertCondition) -> String {
-    match c {
-        AlertCondition::NewIssue => "new_issue".to_string(),
-        AlertCondition::RegressionEvent => "issue_regression".to_string(),
-        AlertCondition::FrequencyThreshold { .. } => "event_frequency".to_string(),
-        AlertCondition::EventAttribute { .. } => "event_attribute".to_string(),
     }
 }
 
 async fn list_alerts(
     State(state): State<AppState>,
     Path(slug): Path<String>,
-) -> Result<Json<Vec<FlatAlertResponse>>, (StatusCode, String)> {
+) -> Result<Json<Vec<AlertRuleResponse>>, (StatusCode, String)> {
     let project_id = resolve_project(&state, &slug).await?;
 
     let rules: Vec<AlertRule> = sqlx::query_as(
@@ -78,34 +72,30 @@ async fn list_alerts(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(Json(rules.iter().map(alert_to_flat).collect()))
+    Ok(Json(rules.iter().map(rule_to_response).collect()))
 }
 
 #[derive(Deserialize)]
-struct FlatAlertInput {
+struct CreateAlertInput {
     name: String,
-    condition_type: String,
-    webhook_url: String,
+    conditions: Vec<AlertCondition>,
+    actions: Vec<AlertAction>,
+    #[serde(default = "default_frequency")]
+    frequency: i64,
 }
+
+fn default_frequency() -> i64 { 1800 }
 
 async fn create_alert(
     State(state): State<AppState>,
     Path(slug): Path<String>,
-    Json(input): Json<FlatAlertInput>,
-) -> Result<(StatusCode, Json<FlatAlertResponse>), (StatusCode, String)> {
+    Json(input): Json<CreateAlertInput>,
+) -> Result<(StatusCode, Json<AlertRuleResponse>), (StatusCode, String)> {
     let project_id = resolve_project(&state, &slug).await?;
 
-    let condition: AlertCondition = match input.condition_type.as_str() {
-        "new_issue" => AlertCondition::NewIssue,
-        "issue_regression" => AlertCondition::RegressionEvent,
-        "event_frequency" => AlertCondition::FrequencyThreshold { threshold: 1, window_seconds: 3600 },
-        other => return Err((StatusCode::BAD_REQUEST, format!("Unknown condition type: {other}"))),
-    };
-    let action = AlertAction::Webhook { url: input.webhook_url };
-
-    let conditions = serde_json::to_string(&vec![condition])
+    let conditions = serde_json::to_string(&input.conditions)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
-    let actions = serde_json::to_string(&vec![action])
+    let actions = serde_json::to_string(&input.actions)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
     let rule = sqlx::query_as::<_, AlertRule>(
@@ -115,27 +105,28 @@ async fn create_alert(
     .bind(&input.name)
     .bind(&conditions)
     .bind(&actions)
-    .bind(1800i64)
+    .bind(input.frequency)
     .fetch_one(state.db.writer())
     .await
     .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-    Ok((StatusCode::CREATED, Json(alert_to_flat(&rule))))
+    Ok((StatusCode::CREATED, Json(rule_to_response(&rule))))
 }
 
 #[derive(Debug, Deserialize)]
 struct UpdateAlertInput {
     name: Option<String>,
     enabled: Option<bool>,
-    condition_type: Option<String>,
-    webhook_url: Option<String>,
+    conditions: Option<Vec<AlertCondition>>,
+    actions: Option<Vec<AlertAction>>,
+    frequency: Option<i64>,
 }
 
 async fn update_alert(
     State(state): State<AppState>,
     Path((slug, alert_id)): Path<(String, i64)>,
     Json(input): Json<UpdateAlertInput>,
-) -> Result<Json<FlatAlertResponse>, (StatusCode, String)> {
+) -> Result<Json<AlertRuleResponse>, (StatusCode, String)> {
     let project_id = resolve_project(&state, &slug).await?;
 
     let existing: AlertRule = sqlx::query_as(
@@ -150,41 +141,36 @@ async fn update_alert(
 
     let name = input.name.unwrap_or(existing.name);
     let enabled = input.enabled.unwrap_or(existing.enabled);
+    let frequency = input.frequency.unwrap_or(existing.frequency);
 
-    let conditions = if let Some(ref ct) = input.condition_type {
-        let condition: AlertCondition = match ct.as_str() {
-            "new_issue" => AlertCondition::NewIssue,
-            "issue_regression" => AlertCondition::RegressionEvent,
-            "event_frequency" => AlertCondition::FrequencyThreshold { threshold: 1, window_seconds: 3600 },
-            other => return Err((StatusCode::BAD_REQUEST, format!("Unknown condition type: {other}"))),
-        };
-        serde_json::to_string(&vec![condition]).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?
+    let conditions = if let Some(c) = input.conditions {
+        serde_json::to_string(&c).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?
     } else {
         existing.conditions
     };
 
-    let actions = if let Some(ref url) = input.webhook_url {
-        let action = AlertAction::Webhook { url: url.clone() };
-        serde_json::to_string(&vec![action]).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?
+    let actions = if let Some(a) = input.actions {
+        serde_json::to_string(&a).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?
     } else {
         existing.actions
     };
 
     let rule = sqlx::query_as::<_, AlertRule>(
-        "UPDATE alert_rules SET name = ?, enabled = ?, conditions = ?, actions = ? \
+        "UPDATE alert_rules SET name = ?, enabled = ?, conditions = ?, actions = ?, frequency = ? \
          WHERE id = ? AND project_id = ? RETURNING *"
     )
     .bind(&name)
     .bind(enabled)
     .bind(&conditions)
     .bind(&actions)
+    .bind(frequency)
     .bind(alert_id)
     .bind(project_id)
     .fetch_one(state.db.writer())
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(Json(alert_to_flat(&rule)))
+    Ok(Json(rule_to_response(&rule)))
 }
 
 async fn delete_alert(

@@ -58,7 +58,7 @@ async fn list_issues(
     let status = params.status.as_deref().unwrap_or("unresolved");
     let sort_col = match params.sort.as_deref() {
         Some("first_seen") => "first_seen",
-        Some("event_count") => "event_count",
+        Some("event_count") | Some("events") => "event_count",
         _ => "last_seen",
     };
 

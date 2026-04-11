@@ -56,6 +56,48 @@ export interface Event {
   data: string;
 }
 
+export interface EventListResponse {
+  events: Event[];
+  nextCursor: string | null;
+}
+
+export interface SearchResponse {
+  results: Event[];
+}
+
+export interface AlertCondition {
+  type: string;
+  threshold?: number;
+  window_seconds?: number;
+  attribute?: string;
+  match_type?: string;
+  value?: string;
+}
+
+export interface AlertAction {
+  type: string;
+  url?: string;
+  path?: string;
+}
+
+export interface AlertRuleResponse {
+  id: number;
+  project_id: number;
+  name: string;
+  enabled: boolean;
+  conditions: AlertCondition[];
+  actions: AlertAction[];
+  frequency: number;
+  last_fired: string | null;
+  created_at: string;
+}
+
+export interface ProjectReleaseSummary {
+  version: string;
+  created_at: string;
+  file_count: number;
+}
+
 export interface CreateProjectInput {
   name: string;
   slug: string;

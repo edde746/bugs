@@ -3,17 +3,12 @@ import { createQuery } from "@tanstack/solid-query";
 import { For, Show } from "solid-js";
 import { api } from "~/api/client";
 import { queryKeys } from "~/queries/keys";
-import type { Event as SentryEvent } from "~/lib/sentry-types";
+import type { EventListResponse } from "~/lib/sentry-types";
 import { relativeTime } from "~/lib/formatters";
 import Badge from "~/components/ui/Badge";
 import Button from "~/components/ui/Button";
 import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
 import EmptyState from "~/components/ui/EmptyState";
-
-interface EventListResponse {
-  events: SentryEvent[];
-  nextCursor: number | null;
-}
 
 export default function IssueEvents() {
   const params = useParams<{ project: string; issueId: string }>();

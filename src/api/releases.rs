@@ -11,6 +11,7 @@ use crate::models::release::*;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
+        .route("/api/internal/projects/{slug}/releases", get(list_project_releases))
         .route("/api/0/organizations/{org}/releases", get(list_releases).post(create_release))
         .route("/api/0/organizations/{org}/releases/{version}", get(get_release))
         .route("/api/0/projects/{org}/{project}/releases/{version}/files/", post(upload_release_file).get(list_release_files))
@@ -39,6 +40,50 @@ fn make_short_version(version: &str) -> String {
     } else {
         version.to_string()
     }
+}
+
+/// Internal release summary for the admin UI
+#[derive(Serialize)]
+struct ProjectReleaseSummary {
+    version: String,
+    created_at: String,
+    file_count: i64,
+}
+
+async fn list_project_releases(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Json<Vec<ProjectReleaseSummary>>, StatusCode> {
+    // Resolve slug or numeric id
+    let project_id: i64 = if let Ok(id) = slug.parse::<i64>() {
+        id
+    } else {
+        let row: Option<(i64,)> = sqlx::query_as("SELECT id FROM projects WHERE slug = ?")
+            .bind(&slug)
+            .fetch_optional(state.db.reader())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        row.ok_or(StatusCode::NOT_FOUND)?.0
+    };
+
+    let rows: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT r.version, r.created_at, \
+                COALESCE((SELECT COUNT(*) FROM release_files rf WHERE rf.release_id = r.id), 0) as file_count \
+         FROM releases r \
+         JOIN release_projects rp ON rp.release_id = r.id \
+         WHERE rp.project_id = ? \
+         ORDER BY r.created_at DESC LIMIT 100"
+    )
+    .bind(project_id)
+    .fetch_all(state.db.reader())
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let response: Vec<ProjectReleaseSummary> = rows.into_iter().map(|(version, created_at, file_count)| {
+        ProjectReleaseSummary { version, created_at, file_count }
+    }).collect();
+
+    Ok(Json(response))
 }
 
 async fn list_releases(

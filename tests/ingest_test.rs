@@ -95,6 +95,44 @@ async fn test_envelope_ingest_and_processing() {
 }
 
 #[tokio::test]
+async fn test_ingest_rejects_mismatched_project_id() {
+    let (base_url, _handle) = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    // Create a project (gets id=1)
+    let project: serde_json::Value = client
+        .post(format!("{base_url}/api/internal/projects"))
+        .json(&serde_json::json!({"name": "Mismatch Test", "slug": "mismatch-test"}))
+        .send().await.unwrap()
+        .json().await.unwrap();
+    let _project_id = project["id"].as_i64().unwrap();
+
+    // Get DSN key for this project
+    let keys: Vec<serde_json::Value> = client
+        .get(format!("{base_url}/api/internal/projects/{_project_id}/keys"))
+        .send().await.unwrap()
+        .json().await.unwrap();
+    let public_key = keys[0]["public_key"].as_str().unwrap();
+
+    // Send envelope to a DIFFERENT project_id (9999) using the valid key
+    let event_id = "deadbeef00000000deadbeef00000001";
+    let event = serde_json::json!({"event_id": event_id, "level": "error", "message": "mismatch test"});
+    let event_str = serde_json::to_string(&event).unwrap();
+    let envelope = format!(
+        "{{\"event_id\":\"{event_id}\"}}\n{{\"type\":\"event\",\"length\":{}}}\n{event_str}\n",
+        event_str.len()
+    );
+
+    let resp = client
+        .post(format!("{base_url}/api/9999/envelope/"))
+        .header("X-Sentry-Auth", format!("Sentry sentry_key={public_key}"))
+        .body(envelope)
+        .send().await.unwrap();
+
+    assert_eq!(resp.status(), 400, "Mismatched project_id should be rejected");
+}
+
+#[tokio::test]
 async fn test_grouping_same_error_same_issue() {
     let (base_url, _handle) = start_test_server().await;
     let client = reqwest::Client::new();
