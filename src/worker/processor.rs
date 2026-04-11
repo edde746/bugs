@@ -59,26 +59,48 @@ pub async fn process_envelope(
 }
 
 async fn mark_failed(db: &DbPool, envelope_id: i64, error_msg: &str) {
-    // Exponential backoff: 10s, 20s, 40s, 80s, ... capped at 3600s
     let truncated = if error_msg.len() > 1000 {
         &error_msg[..1000]
     } else {
         error_msg
     };
 
-    let _ = sqlx::query(
-        "UPDATE event_envelopes SET \
-            state = 'failed', \
-            attempts = attempts + 1, \
-            last_error = ?, \
-            next_attempt_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', \
-                '+' || CAST(MIN(3600, 10 * (1 << MIN(attempts, 8))) AS TEXT) || ' seconds') \
-         WHERE id = ?",
+    // Check current attempts to decide: dead-letter after 5
+    let current: Option<(i64,)> = sqlx::query_as(
+        "SELECT attempts FROM event_envelopes WHERE id = ?"
     )
-    .bind(truncated)
     .bind(envelope_id)
-    .execute(db.writer())
-    .await;
+    .fetch_optional(db.reader())
+    .await
+    .unwrap_or(None);
+
+    let attempts = current.map(|r| r.0).unwrap_or(0);
+
+    if attempts >= 4 {
+        // 5th failure -> dead letter (no more retries)
+        let _ = sqlx::query(
+            "UPDATE event_envelopes SET state = 'dead', attempts = attempts + 1, last_error = ? WHERE id = ?",
+        )
+        .bind(truncated)
+        .bind(envelope_id)
+        .execute(db.writer())
+        .await;
+    } else {
+        // Exponential backoff: 5s, 10s, 20s, 40s, ... capped at 300s
+        let _ = sqlx::query(
+            "UPDATE event_envelopes SET \
+                state = 'failed', \
+                attempts = attempts + 1, \
+                last_error = ?, \
+                next_attempt_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', \
+                    '+' || CAST(MIN(300, 5 * (1 << MIN(attempts, 8))) AS TEXT) || ' seconds') \
+             WHERE id = ?",
+        )
+        .bind(truncated)
+        .bind(envelope_id)
+        .execute(db.writer())
+        .await;
+    }
 }
 
 async fn process_inner(

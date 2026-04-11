@@ -14,6 +14,15 @@ pub fn spawn_retention_task(writer: SqlitePool, retention_days: u32, envelope_re
     });
 }
 
+/// Public entry point for manual cleanup trigger
+pub async fn run_cleanup_now(
+    writer: &SqlitePool,
+    retention_days: u32,
+    envelope_retention_hours: u32,
+) -> Result<(), sqlx::Error> {
+    run_cleanup(writer, retention_days, envelope_retention_hours).await
+}
+
 async fn run_cleanup(
     writer: &SqlitePool,
     retention_days: u32,

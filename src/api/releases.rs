@@ -12,7 +12,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/0/organizations/{org}/releases", get(list_releases).post(create_release))
         .route("/api/0/organizations/{org}/releases/{version}", get(get_release))
-        .route("/api/0/projects/{org}/{project}/releases/{version}/files/", post(upload_release_file))
+        .route("/api/0/projects/{org}/{project}/releases/{version}/files/", post(upload_release_file).get(list_release_files))
 }
 
 async fn list_releases(
@@ -209,4 +209,29 @@ async fn upload_release_file(
     })?;
 
     Ok((StatusCode::CREATED, Json(release_file)))
+}
+
+async fn list_release_files(
+    State(state): State<AppState>,
+    Path((_org, _project, version)): Path<(String, String, String)>,
+) -> Result<Json<Vec<ReleaseFile>>, StatusCode> {
+    let release: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM releases WHERE org_id = 1 AND version = ?"
+    )
+    .bind(&version)
+    .fetch_optional(state.db.reader())
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let release_id = release.ok_or(StatusCode::NOT_FOUND)?.0;
+
+    let files: Vec<ReleaseFile> = sqlx::query_as(
+        "SELECT * FROM release_files WHERE release_id = ? ORDER BY created_at DESC"
+    )
+    .bind(release_id)
+    .fetch_all(state.db.reader())
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(files))
 }

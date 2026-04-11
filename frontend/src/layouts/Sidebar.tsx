@@ -48,6 +48,30 @@ export default function Sidebar() {
             </For>
           )}
         </Show>
+
+        <Show when={params.project}>
+          <div class="mt-4 mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">
+            Navigation
+          </div>
+          <A
+            href={`/${params.project}/issues`}
+            class="mb-0.5 flex items-center rounded-md px-2 py-1.5 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] transition-colors"
+          >
+            Issues
+          </A>
+          <A
+            href={`/${params.project}/releases`}
+            class="mb-0.5 flex items-center rounded-md px-2 py-1.5 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] transition-colors"
+          >
+            Releases
+          </A>
+          <A
+            href={`/${params.project}/alerts`}
+            class="mb-0.5 flex items-center rounded-md px-2 py-1.5 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] transition-colors"
+          >
+            Alerts
+          </A>
+        </Show>
       </nav>
 
       <div class="border-t border-[var(--color-border)] p-3">
