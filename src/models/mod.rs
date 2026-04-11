@@ -1,10 +1,10 @@
-pub mod project;
-pub mod event;
-pub mod issue;
-pub mod release;
+pub mod activity;
 pub mod alert;
 pub mod comment;
-pub mod activity;
-pub mod user_report;
 pub mod deploy;
+pub mod event;
+pub mod issue;
+pub mod project;
+pub mod release;
 pub mod transaction;
+pub mod user_report;

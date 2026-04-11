@@ -1,8 +1,12 @@
 use sqlx::SqlitePool;
-use tokio::time::{interval, Duration};
+use tokio::time::{Duration, interval};
 use tracing::{info, warn};
 
-pub fn spawn_retention_task(writer: SqlitePool, retention_days: u32, envelope_retention_hours: u32) {
+pub fn spawn_retention_task(
+    writer: SqlitePool,
+    retention_days: u32,
+    envelope_retention_hours: u32,
+) {
     tokio::spawn(async move {
         let mut timer = interval(Duration::from_secs(3600));
         loop {
@@ -34,7 +38,7 @@ async fn run_cleanup(
     // Delete done/dead envelopes older than retention
     let envelopes_deleted = sqlx::query(
         "DELETE FROM event_envelopes WHERE state IN ('done', 'dead') \
-         AND received_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)"
+         AND received_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
     )
     .bind(&envelope_cutoff)
     .execute(writer)
@@ -42,7 +46,7 @@ async fn run_cleanup(
 
     // Delete old events
     let events_deleted = sqlx::query(
-        "DELETE FROM events WHERE received_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)"
+        "DELETE FROM events WHERE received_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
     )
     .bind(&event_cutoff)
     .execute(writer)
@@ -57,7 +61,7 @@ async fn run_cleanup(
 
     // Prune old stats
     sqlx::query(
-        "DELETE FROM issue_stats_hourly WHERE bucket < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)"
+        "DELETE FROM issue_stats_hourly WHERE bucket < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
     )
     .bind(&event_cutoff)
     .execute(writer)

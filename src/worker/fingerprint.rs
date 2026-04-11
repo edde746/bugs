@@ -7,10 +7,13 @@ pub fn compute_fingerprint(event: &SentryEvent) -> String {
     if let Some(fp) = &event.fingerprint
         && !fp.is_empty()
     {
-        let parts: Vec<String> = fp.iter().map(|v| match v {
-            serde_json::Value::String(s) => s.clone(),
-            other => other.to_string(),
-        }).collect();
+        let parts: Vec<String> = fp
+            .iter()
+            .map(|v| match v {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            })
+            .collect();
         let parts_ref: Vec<&str> = parts.iter().map(|s| s.as_str()).collect();
         return fingerprint_hash(&parts_ref);
     }
@@ -23,7 +26,9 @@ pub fn compute_fingerprint(event: &SentryEvent) -> String {
         let exc_value = first.value.as_deref().unwrap_or("");
 
         if let Some(st) = &first.stacktrace {
-            let in_app_frames: Vec<String> = st.frames.iter()
+            let in_app_frames: Vec<String> = st
+                .frames
+                .iter()
                 .filter(|f| f.in_app.unwrap_or(false))
                 .map(|f| {
                     format!(
@@ -205,7 +210,10 @@ mod tests {
     #[test]
     fn test_derive_culprit() {
         let e = make_exception_event("TypeError", "err", "handleClick");
-        assert_eq!(derive_culprit(&e), Some("app.js in handleClick".to_string()));
+        assert_eq!(
+            derive_culprit(&e),
+            Some("app.js in handleClick".to_string())
+        );
     }
 
     #[test]

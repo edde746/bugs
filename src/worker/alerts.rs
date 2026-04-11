@@ -26,12 +26,11 @@ pub async fn evaluate_alerts(
     is_regression: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // 1. Load enabled alert rules for the project
-    let rules: Vec<AlertRule> = sqlx::query_as(
-        "SELECT * FROM alert_rules WHERE project_id = ? AND enabled = 1",
-    )
-    .bind(project_id)
-    .fetch_all(db.reader())
-    .await?;
+    let rules: Vec<AlertRule> =
+        sqlx::query_as("SELECT * FROM alert_rules WHERE project_id = ? AND enabled = 1")
+            .bind(project_id)
+            .fetch_all(db.reader())
+            .await?;
 
     if rules.is_empty() {
         return Ok(());
@@ -63,7 +62,16 @@ pub async fn evaluate_alerts(
         // 2c. Evaluate ALL conditions (AND logic)
         let mut all_match = true;
         for condition in &conditions {
-            let matches = evaluate_condition(db, condition, project_id, issue_id, event, is_new_issue, is_regression).await;
+            let matches = evaluate_condition(
+                db,
+                condition,
+                project_id,
+                issue_id,
+                event,
+                is_new_issue,
+                is_regression,
+            )
+            .await;
             if !matches {
                 all_match = false;
                 break;
@@ -86,7 +94,9 @@ pub async fn evaluate_alerts(
         debug!(rule_id = rule.id, rule_name = %rule.name, "Alert rule fired");
 
         for action in &actions {
-            if let Err(e) = fire_action(action, &rule.name, project_id, issue_id, event, config).await {
+            if let Err(e) =
+                fire_action(action, &rule.name, project_id, issue_id, event, config).await
+            {
                 error!(rule_id = rule.id, "Alert action failed: {e}");
             }
         }
@@ -117,12 +127,15 @@ async fn evaluate_condition(
 
         AlertCondition::RegressionEvent => is_regression,
 
-        AlertCondition::FrequencyThreshold { threshold, window_seconds } => {
+        AlertCondition::FrequencyThreshold {
+            threshold,
+            window_seconds,
+        } => {
             // Count events in issue_stats_hourly within window
             let window_start = (chrono::Utc::now()
                 - chrono::Duration::seconds(*window_seconds as i64))
-                .format("%Y-%m-%dT%H:00:00Z")
-                .to_string();
+            .format("%Y-%m-%dT%H:00:00Z")
+            .to_string();
 
             let result: Option<(i64,)> = sqlx::query_as(
                 "SELECT COALESCE(SUM(count), 0) FROM issue_stats_hourly \
@@ -141,7 +154,11 @@ async fn evaluate_condition(
             }
         }
 
-        AlertCondition::EventAttribute { attribute, match_type, value } => {
+        AlertCondition::EventAttribute {
+            attribute,
+            match_type,
+            value,
+        } => {
             let event_value = match attribute.as_str() {
                 "level" => event.level.as_deref().unwrap_or(""),
                 "environment" => event.environment.as_deref().unwrap_or(""),
@@ -181,12 +198,11 @@ fn level_color_hex(level: &str) -> String {
     format!("#{:06x}", level_color_int(level))
 }
 
-async fn send_webhook(url: &str, payload: &serde_json::Value) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let resp = HTTP_CLIENT
-        .post(url)
-        .json(payload)
-        .send()
-        .await?;
+async fn send_webhook(
+    url: &str,
+    payload: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let resp = HTTP_CLIENT.post(url).json(payload).send().await?;
 
     if !resp.status().is_success() {
         warn!(url, status = %resp.status(), "Webhook returned non-success status");
@@ -291,16 +307,17 @@ async fn fire_action(
                  Project ID: {}\n\
                  Issue ID: {}\n\
                  Event ID: {}\n",
-                rule_name, title, level, env_text,
-                project_id, issue_id,
+                rule_name,
+                title,
+                level,
+                env_text,
+                project_id,
+                issue_id,
                 event.event_id.as_deref().unwrap_or("unknown"),
             );
 
             use lettre::{
-                Message,
-                SmtpTransport,
-                Transport,
-                transport::smtp::authentication::Credentials,
+                Message, SmtpTransport, Transport, transport::smtp::authentication::Credentials,
             };
 
             let email = Message::builder()
@@ -341,7 +358,10 @@ async fn fire_action(
         AlertAction::LogFile { path } => {
             let line = format!(
                 "[{}] Alert '{}' fired: project={} issue={} event={}\n",
-                now_iso(), rule_name, project_id, issue_id,
+                now_iso(),
+                rule_name,
+                project_id,
+                issue_id,
                 event.event_id.as_deref().unwrap_or("unknown"),
             );
 

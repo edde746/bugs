@@ -1,13 +1,27 @@
-use axum::{Router, Json, extract::{Path, Query, State}, http::StatusCode, routing::get};
-use serde::Deserialize;
 use crate::AppState;
 use crate::models::transaction::*;
+use axum::{
+    Json, Router,
+    extract::{Path, Query, State},
+    http::StatusCode,
+    routing::get,
+};
+use serde::Deserialize;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/api/internal/projects/{slug}/transactions", get(list_transaction_groups))
-        .route("/api/internal/transaction-groups/{id}", get(get_transaction_group))
-        .route("/api/internal/transaction-groups/{id}/transactions", get(list_transactions))
+        .route(
+            "/api/internal/projects/{slug}/transactions",
+            get(list_transaction_groups),
+        )
+        .route(
+            "/api/internal/transaction-groups/{id}",
+            get(get_transaction_group),
+        )
+        .route(
+            "/api/internal/transaction-groups/{id}/transactions",
+            get(list_transactions),
+        )
 }
 
 #[derive(Deserialize)]
@@ -17,7 +31,9 @@ struct TransactionQuery {
     sort: Option<String>,
 }
 
-fn default_limit() -> i64 { 50 }
+fn default_limit() -> i64 {
+    50
+}
 
 async fn list_transaction_groups(
     State(state): State<AppState>,

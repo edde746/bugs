@@ -180,8 +180,8 @@ pub async fn symbolicate_event(
 
             // Set in_app based on filename heuristic
             if let Some(ref filename) = frame.filename {
-                let is_in_app = !filename.contains("node_modules")
-                    && !filename.contains("webpack/");
+                let is_in_app =
+                    !filename.contains("node_modules") && !filename.contains("webpack/");
                 frame.in_app = Some(is_in_app);
             }
         }
@@ -205,8 +205,7 @@ async fn load_source_map(
     let data = tokio::fs::read(file_path).await?;
 
     // Parse source map (blocking operation, use spawn_blocking)
-    let sm = tokio::task::spawn_blocking(move || SourceMap::from_reader(&data[..]))
-        .await??;
+    let sm = tokio::task::spawn_blocking(move || SourceMap::from_reader(&data[..])).await??;
 
     let sm = Arc::new(sm);
 

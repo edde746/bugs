@@ -1,6 +1,6 @@
 use crate::sentry_protocol::types::SentryEvent;
-use crate::util::time::{parse_timestamp, now_iso};
 use crate::util::id::generate_event_id;
+use crate::util::time::{now_iso, parse_timestamp};
 
 /// Normalize a raw Sentry event: fill defaults, parse timestamps
 pub fn normalize(event: &mut SentryEvent) {
@@ -26,9 +26,9 @@ pub fn normalize(event: &mut SentryEvent) {
 
     // Normalize fingerprint: {{ default }} means use server-side grouping
     if let Some(fp) = &event.fingerprint {
-        let all_default = fp.iter().all(|v| {
-            v.as_str().map(|s| s == "{{ default }}").unwrap_or(false)
-        });
+        let all_default = fp
+            .iter()
+            .all(|v| v.as_str().map(|s| s == "{{ default }}").unwrap_or(false));
         if all_default {
             event.fingerprint = None;
         }

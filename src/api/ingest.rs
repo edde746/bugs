@@ -1,10 +1,9 @@
 use axum::{
-    Router,
+    Json, Router,
     extract::{Path, State},
-    http::{StatusCode, HeaderMap},
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::post,
-    Json,
 };
 use bytes::Bytes;
 use serde_json::json;
@@ -48,23 +47,22 @@ async fn ingest_envelope(
     // Check rate limit
     if let Some(limit) = key.rate_limit
         && limit > 0
-        && !state.rate_limiter.check(&auth.sentry_key, limit as u64).await
+        && !state
+            .rate_limiter
+            .check(&auth.sentry_key, limit as u64)
+            .await
     {
-        return Err((
-            StatusCode::TOO_MANY_REQUESTS,
-            "Rate limit exceeded".into(),
-        ));
+        return Err((StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded".into()));
     }
 
     // Check origin allowlist
     if let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok()) {
-        let settings: Option<(Option<String>,)> = sqlx::query_as(
-            "SELECT allowed_origins FROM project_settings WHERE project_id = ?"
-        )
-        .bind(key.project_id)
-        .fetch_optional(state.db.reader())
-        .await
-        .unwrap_or(None);
+        let settings: Option<(Option<String>,)> =
+            sqlx::query_as("SELECT allowed_origins FROM project_settings WHERE project_id = ?")
+                .bind(key.project_id)
+                .fetch_optional(state.db.reader())
+                .await
+                .unwrap_or(None);
 
         if let Some((Some(allowed_json),)) = settings
             && let Ok(allowed) = serde_json::from_str::<Vec<String>>(&allowed_json)
@@ -88,20 +86,26 @@ async fn ingest_envelope(
 
     // Decompress if gzipped
     let data = if body.len() >= 2 && body[0] == 0x1f && body[1] == 0x8b {
-        decompress_gzip(&body)
-            .map_err(|e| (StatusCode::BAD_REQUEST, format!("Decompression failed: {e}")))?
+        decompress_gzip(&body).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("Decompression failed: {e}"),
+            )
+        })?
     } else {
         body.to_vec()
     };
 
     // Check decompressed size
     if data.len() > state.config.ingest.max_envelope_bytes {
-        return Err((StatusCode::PAYLOAD_TOO_LARGE, "Decompressed envelope too large".into()));
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "Decompressed envelope too large".into(),
+        ));
     }
 
     // Extract event_id from first line (fast path — no full envelope parse)
-    let event_id = extract_event_id(&data)
-        .unwrap_or_else(generate_event_id);
+    let event_id = extract_event_id(&data).unwrap_or_else(generate_event_id);
 
     // Store raw envelope (use key.project_id, not URL param, as source of truth)
     let insert_result = sqlx::query(
@@ -118,14 +122,13 @@ async fn ingest_envelope(
     // Duplicate submissions (rows_affected == 0) are ignored — the existing
     // envelope is already queued or being processed, and the poller handles recovery.
     if insert_result.rows_affected() > 0 {
-        let envelope_id: Option<(i64,)> = sqlx::query_as(
-            "SELECT id FROM event_envelopes WHERE project_id = ? AND event_id = ?"
-        )
-        .bind(key.project_id)
-        .bind(&event_id)
-        .fetch_optional(state.db.reader())
-        .await
-        .unwrap_or(None);
+        let envelope_id: Option<(i64,)> =
+            sqlx::query_as("SELECT id FROM event_envelopes WHERE project_id = ? AND event_id = ?")
+                .bind(key.project_id)
+                .bind(&event_id)
+                .fetch_optional(state.db.reader())
+                .await
+                .unwrap_or(None);
 
         if let Some((id,)) = envelope_id {
             let _ = state.worker_tx.try_send(id);
@@ -145,7 +148,14 @@ async fn ingest_store(
     let event_id = generate_event_id();
     let envelope_body = crate::ingest::store::wrap_store_body(&body, &event_id);
     let envelope_bytes = Bytes::from(envelope_body);
-    ingest_envelope(State(state), Path(project_id), headers, auth, envelope_bytes).await
+    ingest_envelope(
+        State(state),
+        Path(project_id),
+        headers,
+        auth,
+        envelope_bytes,
+    )
+    .await
 }
 
 /// CSP / security report ingest (best-effort: store as event envelope)
@@ -159,7 +169,14 @@ async fn ingest_security(
     let event_id = generate_event_id();
     let envelope_body = crate::ingest::store::wrap_store_body(&body, &event_id);
     let envelope_bytes = Bytes::from(envelope_body);
-    ingest_envelope(State(state), Path(project_id), headers, auth, envelope_bytes).await
+    ingest_envelope(
+        State(state),
+        Path(project_id),
+        headers,
+        auth,
+        envelope_bytes,
+    )
+    .await
 }
 
 fn decompress_gzip(data: &[u8]) -> Result<Vec<u8>, std::io::Error> {

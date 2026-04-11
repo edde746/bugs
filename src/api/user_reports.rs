@@ -1,7 +1,12 @@
-use axum::{Router, Json, extract::{Path, Query, State}, http::StatusCode, routing::get};
-use serde::Deserialize;
 use crate::AppState;
 use crate::models::user_report::UserReport;
+use axum::{
+    Json, Router,
+    extract::{Path, Query, State},
+    http::StatusCode,
+    routing::get,
+};
+use serde::Deserialize;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -21,7 +26,9 @@ struct ReportQuery {
     limit: i64,
 }
 
-fn default_limit() -> i64 { 50 }
+fn default_limit() -> i64 {
+    50
+}
 
 async fn list_project_reports(
     State(state): State<AppState>,

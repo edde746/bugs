@@ -1,22 +1,42 @@
 use std::io::Read;
 
-use axum::{Router, Json, extract::{Path, Query, State, Multipart}, http::StatusCode, routing::{get, post}};
+use axum::{
+    Json, Router,
+    extract::{Multipart, Path, Query, State},
+    http::StatusCode,
+    routing::{get, post},
+};
 use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use tracing::warn;
 
 use crate::AppState;
-use crate::models::release::*;
 use crate::models::deploy::*;
+use crate::models::release::*;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/api/internal/projects/{slug}/releases", get(list_project_releases))
-        .route("/api/0/organizations/{org}/releases", get(list_releases).post(create_release))
-        .route("/api/0/organizations/{org}/releases/{version}", get(get_release))
-        .route("/api/0/projects/{org}/{project}/releases/{version}/files/", post(upload_release_file).get(list_release_files))
-        .route("/api/0/organizations/{org}/releases/{version}/deploys/", get(list_deploys).post(create_deploy))
+        .route(
+            "/api/internal/projects/{slug}/releases",
+            get(list_project_releases),
+        )
+        .route(
+            "/api/0/organizations/{org}/releases",
+            get(list_releases).post(create_release),
+        )
+        .route(
+            "/api/0/organizations/{org}/releases/{version}",
+            get(get_release),
+        )
+        .route(
+            "/api/0/projects/{org}/{project}/releases/{version}/files/",
+            post(upload_release_file).get(list_release_files),
+        )
+        .route(
+            "/api/0/organizations/{org}/releases/{version}/deploys/",
+            get(list_deploys).post(create_deploy),
+        )
 }
 
 #[derive(Deserialize)]
@@ -81,9 +101,14 @@ async fn list_project_releases(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let response: Vec<ProjectReleaseSummary> = rows.into_iter().map(|(version, created_at, file_count)| {
-        ProjectReleaseSummary { version, created_at, file_count }
-    }).collect();
+    let response: Vec<ProjectReleaseSummary> = rows
+        .into_iter()
+        .map(|(version, created_at, file_count)| ProjectReleaseSummary {
+            version,
+            created_at,
+            file_count,
+        })
+        .collect();
 
     Ok(Json(response))
 }
@@ -110,7 +135,7 @@ async fn list_releases(
                 "SELECT r.* FROM releases r \
                  JOIN release_projects rp ON rp.release_id = r.id \
                  WHERE r.org_id = 1 AND rp.project_id = ? \
-                 ORDER BY r.created_at DESC LIMIT 100"
+                 ORDER BY r.created_at DESC LIMIT 100",
             )
             .bind(pid)
             .fetch_all(state.db.reader())
@@ -120,21 +145,22 @@ async fn list_releases(
             Vec::new()
         }
     } else {
-        sqlx::query_as(
-            "SELECT * FROM releases WHERE org_id = 1 ORDER BY created_at DESC LIMIT 100"
-        )
-        .fetch_all(state.db.reader())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        sqlx::query_as("SELECT * FROM releases WHERE org_id = 1 ORDER BY created_at DESC LIMIT 100")
+            .fetch_all(state.db.reader())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };
 
-    let response: Vec<ReleaseResponse> = releases.iter().map(|r| ReleaseResponse {
-        version: r.version.clone(),
-        date_created: r.created_at.clone(),
-        date_released: None,
-        short_version: make_short_version(&r.version),
-        new_groups: 0,
-    }).collect();
+    let response: Vec<ReleaseResponse> = releases
+        .iter()
+        .map(|r| ReleaseResponse {
+            version: r.version.clone(),
+            date_created: r.created_at.clone(),
+            date_released: None,
+            short_version: make_short_version(&r.version),
+            new_groups: 0,
+        })
+        .collect();
 
     Ok(Json(response))
 }
@@ -147,7 +173,7 @@ async fn create_release(
     let release = sqlx::query_as::<_, Release>(
         "INSERT INTO releases (org_id, version) VALUES (1, ?) \
          ON CONFLICT(org_id, version) DO UPDATE SET org_id=org_id \
-         RETURNING *"
+         RETURNING *",
     )
     .bind(&input.version)
     .fetch_one(state.db.writer())
@@ -157,18 +183,16 @@ async fn create_release(
     // Associate with projects and auto-resolve "next release" issues
     if let Some(projects) = &input.projects {
         for slug in projects {
-            let project: Option<(i64,)> = sqlx::query_as(
-                "SELECT id FROM projects WHERE slug = ?"
-            )
-            .bind(slug)
-            .fetch_optional(state.db.reader())
-            .await
-            .unwrap_or(None);
+            let project: Option<(i64,)> = sqlx::query_as("SELECT id FROM projects WHERE slug = ?")
+                .bind(slug)
+                .fetch_optional(state.db.reader())
+                .await
+                .unwrap_or(None);
 
             let Some((pid,)) = project else { continue };
 
             sqlx::query(
-                "INSERT OR IGNORE INTO release_projects (release_id, project_id) VALUES (?, ?)"
+                "INSERT OR IGNORE INTO release_projects (release_id, project_id) VALUES (?, ?)",
             )
             .bind(release.id)
             .bind(pid)
@@ -179,7 +203,7 @@ async fn create_release(
             // Auto-resolve issues marked "resolve in next release"
             let result = sqlx::query(
                 "UPDATE issues SET status = 'resolved', resolved_in_release = ? \
-                 WHERE project_id = ? AND status = 'resolved' AND resolved_in_release = '__next__'"
+                 WHERE project_id = ? AND status = 'resolved' AND resolved_in_release = '__next__'",
             )
             .bind(&input.version)
             .bind(pid)
@@ -274,8 +298,7 @@ async fn upload_release_file(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // Decompress if gzipped
-    let content = if file_content.len() >= 2 && file_content[0] == 0x1f && file_content[1] == 0x8b
-    {
+    let content = if file_content.len() >= 2 && file_content[0] == 0x1f && file_content[1] == 0x8b {
         let mut decoder = GzDecoder::new(&file_content[..]);
         let mut decompressed = Vec::new();
         decoder
@@ -292,9 +315,7 @@ async fn upload_release_file(
     let sha256 = hex::encode(hasher.finalize());
 
     // Sanitize name for filesystem path
-    let sanitized_name = artifact_name
-        .replace("~/", "")
-        .replace(['/', '\\'], "_");
+    let sanitized_name = artifact_name.replace("~/", "").replace(['/', '\\'], "_");
 
     // Build file path
     let org_id: i64 = 1;
@@ -305,13 +326,19 @@ async fn upload_release_file(
     let file_path = format!("{}/{}", dir_path, sanitized_name);
 
     // Save to disk
-    tokio::fs::create_dir_all(&dir_path)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create dir: {e}")))?;
+    tokio::fs::create_dir_all(&dir_path).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to create dir: {e}"),
+        )
+    })?;
 
-    tokio::fs::write(&file_path, &content)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to write file: {e}")))?;
+    tokio::fs::write(&file_path, &content).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to write file: {e}"),
+        )
+    })?;
 
     let file_size = content.len() as i64;
 
@@ -345,23 +372,21 @@ async fn list_release_files(
     State(state): State<AppState>,
     Path((_org, _project, version)): Path<(String, String, String)>,
 ) -> Result<Json<Vec<ReleaseFile>>, StatusCode> {
-    let release: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM releases WHERE org_id = 1 AND version = ?"
-    )
-    .bind(&version)
-    .fetch_optional(state.db.reader())
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let release: Option<(i64,)> =
+        sqlx::query_as("SELECT id FROM releases WHERE org_id = 1 AND version = ?")
+            .bind(&version)
+            .fetch_optional(state.db.reader())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let release_id = release.ok_or(StatusCode::NOT_FOUND)?.0;
 
-    let files: Vec<ReleaseFile> = sqlx::query_as(
-        "SELECT * FROM release_files WHERE release_id = ? ORDER BY created_at DESC"
-    )
-    .bind(release_id)
-    .fetch_all(state.db.reader())
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let files: Vec<ReleaseFile> =
+        sqlx::query_as("SELECT * FROM release_files WHERE release_id = ? ORDER BY created_at DESC")
+            .bind(release_id)
+            .fetch_all(state.db.reader())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(files))
 }
@@ -370,23 +395,21 @@ async fn list_deploys(
     State(state): State<AppState>,
     Path((_org, version)): Path<(String, String)>,
 ) -> Result<Json<Vec<Deploy>>, StatusCode> {
-    let release: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM releases WHERE org_id = 1 AND version = ?",
-    )
-    .bind(&version)
-    .fetch_optional(state.db.reader())
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let release: Option<(i64,)> =
+        sqlx::query_as("SELECT id FROM releases WHERE org_id = 1 AND version = ?")
+            .bind(&version)
+            .fetch_optional(state.db.reader())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let release_id = release.ok_or(StatusCode::NOT_FOUND)?.0;
 
-    let deploys: Vec<Deploy> = sqlx::query_as(
-        "SELECT * FROM deploys WHERE release_id = ? ORDER BY date_finished DESC",
-    )
-    .bind(release_id)
-    .fetch_all(state.db.reader())
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let deploys: Vec<Deploy> =
+        sqlx::query_as("SELECT * FROM deploys WHERE release_id = ? ORDER BY date_finished DESC")
+            .bind(release_id)
+            .fetch_all(state.db.reader())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(deploys))
 }
@@ -396,15 +419,16 @@ async fn create_deploy(
     Path((_org, version)): Path<(String, String)>,
     Json(input): Json<CreateDeploy>,
 ) -> Result<(StatusCode, Json<Deploy>), (StatusCode, String)> {
-    let release: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM releases WHERE org_id = 1 AND version = ?",
-    )
-    .bind(&version)
-    .fetch_optional(state.db.reader())
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let release: Option<(i64,)> =
+        sqlx::query_as("SELECT id FROM releases WHERE org_id = 1 AND version = ?")
+            .bind(&version)
+            .fetch_optional(state.db.reader())
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let release_id = release.ok_or((StatusCode::NOT_FOUND, "Release not found".to_string()))?.0;
+    let release_id = release
+        .ok_or((StatusCode::NOT_FOUND, "Release not found".to_string()))?
+        .0;
 
     let deploy: Deploy = sqlx::query_as(
         "INSERT INTO deploys (release_id, environment, name, url, date_started, date_finished) \

@@ -1,20 +1,20 @@
-use std::sync::Arc;
 use axum::http::header;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::info;
 
+use bugs::AppState;
 use bugs::config::Config;
 use bugs::db::DbPool;
 use bugs::db::checkpoint::CheckpointManager;
-use bugs::AppState;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "bugs=info,tower_http=info".parse().unwrap())
+                .unwrap_or_else(|_| "bugs=info,tower_http=info".parse().unwrap()),
         )
         .init();
 
@@ -44,7 +44,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     checkpoint.clone().spawn_quiet_checkpoint_task();
 
-    bugs::worker::spawn(db.clone(), config.clone(), checkpoint.clone(), worker_tx.clone(), worker_rx);
+    bugs::worker::spawn(
+        db.clone(),
+        config.clone(),
+        checkpoint.clone(),
+        worker_tx.clone(),
+        worker_rx,
+    );
 
     bugs::db::retention::spawn_retention_task(
         db.writer().clone(),
@@ -105,6 +111,8 @@ fn is_loopback_address(addr: &str) -> bool {
 }
 
 async fn shutdown_signal() {
-    tokio::signal::ctrl_c().await.expect("Failed to install CTRL+C handler");
+    tokio::signal::ctrl_c()
+        .await
+        .expect("Failed to install CTRL+C handler");
     info!("Shutting down");
 }

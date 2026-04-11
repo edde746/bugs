@@ -1,11 +1,11 @@
+pub mod api;
 pub mod config;
 pub mod db;
-pub mod api;
 pub mod ingest;
-pub mod worker;
 pub mod models;
 pub mod sentry_protocol;
 pub mod util;
+pub mod worker;
 
 use std::sync::Arc;
 use tokio::sync::mpsc;

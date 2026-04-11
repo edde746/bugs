@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use std::time::Instant;
+use tokio::sync::Mutex;
 
 /// In-memory sliding window rate limiter
 #[derive(Clone)]

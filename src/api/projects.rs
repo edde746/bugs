@@ -1,21 +1,33 @@
 use axum::{
-    Router, Json,
+    Json, Router,
     extract::{Path, State},
     http::StatusCode,
-    routing::{get, delete},
+    routing::{delete, get},
 };
 
 use crate::AppState;
 use crate::models::project::*;
-use crate::util::id::generate_public_key;
 use crate::sentry_protocol::dsn::build_dsn;
+use crate::util::id::generate_public_key;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/api/internal/projects", get(list_projects).post(create_project))
-        .route("/api/internal/projects/{id}", get(get_project).put(update_project).delete(delete_project))
-        .route("/api/internal/projects/{id}/keys", get(list_keys).post(create_key))
-        .route("/api/internal/projects/{id}/keys/{key_id}", delete(delete_key))
+        .route(
+            "/api/internal/projects",
+            get(list_projects).post(create_project),
+        )
+        .route(
+            "/api/internal/projects/{id}",
+            get(get_project).put(update_project).delete(delete_project),
+        )
+        .route(
+            "/api/internal/projects/{id}/keys",
+            get(list_keys).post(create_key),
+        )
+        .route(
+            "/api/internal/projects/{id}/keys/{key_id}",
+            delete(delete_key),
+        )
 }
 
 async fn list_projects(State(state): State<AppState>) -> Result<Json<Vec<Project>>, StatusCode> {
@@ -31,7 +43,7 @@ async fn create_project(
     Json(input): Json<CreateProject>,
 ) -> Result<(StatusCode, Json<Project>), (StatusCode, String)> {
     let result = sqlx::query_as::<_, Project>(
-        "INSERT INTO projects (name, slug, platform) VALUES (?, ?, ?) RETURNING *"
+        "INSERT INTO projects (name, slug, platform) VALUES (?, ?, ?) RETURNING *",
     )
     .bind(&input.name)
     .bind(&input.slug)
@@ -77,24 +89,19 @@ async fn update_project(
     Path(id): Path<i64>,
     Json(input): Json<CreateProject>,
 ) -> Result<Json<Project>, StatusCode> {
-    sqlx::query_as(
-        "UPDATE projects SET name = ?, slug = ?, platform = ? WHERE id = ? RETURNING *"
-    )
-    .bind(&input.name)
-    .bind(&input.slug)
-    .bind(&input.platform)
-    .bind(id)
-    .fetch_optional(state.db.writer())
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .map(Json)
-    .ok_or(StatusCode::NOT_FOUND)
+    sqlx::query_as("UPDATE projects SET name = ?, slug = ?, platform = ? WHERE id = ? RETURNING *")
+        .bind(&input.name)
+        .bind(&input.slug)
+        .bind(&input.platform)
+        .bind(id)
+        .fetch_optional(state.db.writer())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
 }
 
-async fn delete_project(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-) -> StatusCode {
+async fn delete_project(State(state): State<AppState>, Path(id): Path<i64>) -> StatusCode {
     match sqlx::query("DELETE FROM projects WHERE id = ?")
         .bind(id)
         .execute(state.db.writer())
@@ -109,13 +116,12 @@ async fn list_keys(
     State(state): State<AppState>,
     Path(project_id): Path<i64>,
 ) -> Result<Json<Vec<serde_json::Value>>, StatusCode> {
-    let keys: Vec<ProjectKey> = sqlx::query_as(
-        "SELECT * FROM project_keys WHERE project_id = ? ORDER BY created_at DESC"
-    )
-    .bind(project_id)
-    .fetch_all(state.db.reader())
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let keys: Vec<ProjectKey> =
+        sqlx::query_as("SELECT * FROM project_keys WHERE project_id = ? ORDER BY created_at DESC")
+            .bind(project_id)
+            .fetch_all(state.db.reader())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Enrich with DSN
     let (scheme, host) = if let Some(ref url) = state.config.public_url {
@@ -132,18 +138,21 @@ async fn list_keys(
     } else {
         ("http".to_string(), state.config.bind_address.clone())
     };
-    let enriched: Vec<serde_json::Value> = keys.iter().map(|k| {
-        let dsn = build_dsn(&scheme, &host, &k.public_key, k.project_id);
-        serde_json::json!({
-            "id": k.id,
-            "project_id": k.project_id,
-            "public_key": k.public_key,
-            "label": k.label,
-            "is_active": k.is_active,
-            "dsn": dsn,
-            "created_at": k.created_at,
+    let enriched: Vec<serde_json::Value> = keys
+        .iter()
+        .map(|k| {
+            let dsn = build_dsn(&scheme, &host, &k.public_key, k.project_id);
+            serde_json::json!({
+                "id": k.id,
+                "project_id": k.project_id,
+                "public_key": k.public_key,
+                "label": k.label,
+                "is_active": k.is_active,
+                "dsn": dsn,
+                "created_at": k.created_at,
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(Json(enriched))
 }

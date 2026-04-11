@@ -1,3 +1,3 @@
-pub mod types;
-pub mod envelope;
 pub mod dsn;
+pub mod envelope;
+pub mod types;

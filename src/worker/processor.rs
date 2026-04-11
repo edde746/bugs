@@ -8,7 +8,7 @@ use crate::db::DbPool;
 use crate::db::checkpoint::CheckpointManager;
 use crate::sentry_protocol::envelope::Envelope;
 use crate::sentry_protocol::types::SentryEvent;
-use crate::util::time::{now_iso, hour_bucket};
+use crate::util::time::{hour_bucket, now_iso};
 use crate::worker::{alerts, fingerprint, indexer, normalizer, symbolication};
 
 pub async fn process_envelope(
@@ -128,7 +128,9 @@ async fn process_inner(
         normalizer::normalize(&mut event);
 
         // 6. Symbolicate using source maps
-        if let Err(e) = symbolication::symbolicate_event(&mut event, db, &config.artifacts_dir).await {
+        if let Err(e) =
+            symbolication::symbolicate_event(&mut event, db, &config.artifacts_dir).await
+        {
             warn!(envelope_id, "Symbolication failed (non-fatal): {e}");
         }
 
@@ -166,12 +168,7 @@ async fn process_inner(
         let message = event
             .message
             .clone()
-            .or_else(|| {
-                event
-                    .logentry
-                    .as_ref()
-                    .and_then(|le| le.message.clone())
-            });
+            .or_else(|| event.logentry.as_ref().and_then(|le| le.message.clone()));
 
         // Extract exception_values: "Type: value" joined by newlines
         let exception_values = event.exception.as_ref().map(|exc| {
@@ -337,9 +334,17 @@ async fn process_inner(
         .await?;
 
         // 12. Evaluate alert rules
-        alerts::evaluate_alerts(db, config, project_id, issue_id, &event, is_new_issue, is_regression)
-            .await
-            .ok();
+        alerts::evaluate_alerts(
+            db,
+            config,
+            project_id,
+            issue_id,
+            &event,
+            is_new_issue,
+            is_regression,
+        )
+        .await
+        .ok();
 
         processed_any = true;
     }
@@ -381,7 +386,10 @@ async fn process_inner(
                 .to_string();
 
             // Calculate duration from start_timestamp and timestamp (both in seconds as f64)
-            let start_ts = txn.get("start_timestamp").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let start_ts = txn
+                .get("start_timestamp")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
             let end_ts = txn.get("timestamp").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let duration_ms = (end_ts - start_ts) * 1000.0;
 
@@ -398,8 +406,14 @@ async fn process_inner(
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
 
-            let environment = txn.get("environment").and_then(|v| v.as_str()).map(|s| s.to_string());
-            let release = txn.get("release").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let environment = txn
+                .get("environment")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let release = txn
+                .get("release")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
 
             let is_error = status != "ok" && status != "cancelled";
 
@@ -492,7 +506,10 @@ async fn process_inner(
     }
 
     if !processed_any {
-        debug!(envelope_id, "Envelope contained no processable items, skipping");
+        debug!(
+            envelope_id,
+            "Envelope contained no processable items, skipping"
+        );
     }
 
     Ok(())

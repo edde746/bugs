@@ -1,4 +1,10 @@
-use axum::{Router, extract::Path, http::{StatusCode, header}, response::IntoResponse, routing::get};
+use axum::{
+    Router,
+    extract::Path,
+    http::{StatusCode, header},
+    response::IntoResponse,
+    routing::get,
+};
 use rust_embed::Embed;
 
 use crate::AppState;
@@ -22,7 +28,8 @@ async fn serve_asset(Path(path): Path<String>) -> impl IntoResponse {
                 StatusCode::OK,
                 [(header::CONTENT_TYPE, mime.as_ref().to_string())],
                 content.data.into_owned(),
-            ).into_response()
+            )
+                .into_response()
         }
         None => StatusCode::NOT_FOUND.into_response(),
     }

@@ -1,7 +1,12 @@
-use axum::{Router, Json, extract::{Path, State}, http::StatusCode, routing::get};
 use crate::AppState;
-use crate::models::comment::*;
 use crate::models::activity::IssueActivity;
+use crate::models::comment::*;
+use axum::{
+    Json, Router,
+    extract::{Path, State},
+    http::StatusCode,
+    routing::get,
+};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -23,13 +28,12 @@ async fn list_comments(
     State(state): State<AppState>,
     Path(issue_id): Path<i64>,
 ) -> Result<Json<Vec<IssueComment>>, StatusCode> {
-    let comments: Vec<IssueComment> = sqlx::query_as(
-        "SELECT * FROM issue_comments WHERE issue_id = ? ORDER BY created_at ASC",
-    )
-    .bind(issue_id)
-    .fetch_all(state.db.reader())
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let comments: Vec<IssueComment> =
+        sqlx::query_as("SELECT * FROM issue_comments WHERE issue_id = ? ORDER BY created_at ASC")
+            .bind(issue_id)
+            .fetch_all(state.db.reader())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(comments))
 }
@@ -39,14 +43,13 @@ async fn create_comment(
     Path(issue_id): Path<i64>,
     Json(input): Json<CreateComment>,
 ) -> Result<(StatusCode, Json<IssueComment>), StatusCode> {
-    let comment: IssueComment = sqlx::query_as(
-        "INSERT INTO issue_comments (issue_id, text) VALUES (?, ?) RETURNING *",
-    )
-    .bind(issue_id)
-    .bind(&input.text)
-    .fetch_one(state.db.writer())
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let comment: IssueComment =
+        sqlx::query_as("INSERT INTO issue_comments (issue_id, text) VALUES (?, ?) RETURNING *")
+            .bind(issue_id)
+            .bind(&input.text)
+            .fetch_one(state.db.writer())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok((StatusCode::CREATED, Json(comment)))
 }
@@ -66,10 +69,7 @@ async fn list_activity(
     Ok(Json(activity))
 }
 
-async fn delete_comment(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-) -> StatusCode {
+async fn delete_comment(State(state): State<AppState>, Path(id): Path<i64>) -> StatusCode {
     match sqlx::query("DELETE FROM issue_comments WHERE id = ?")
         .bind(id)
         .execute(state.db.writer())

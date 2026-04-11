@@ -1,4 +1,7 @@
-use figment::{Figment, providers::{Env, Format, Toml, Serialized}};
+use figment::{
+    Figment,
+    providers::{Env, Format, Serialized, Toml},
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,26 +110,64 @@ pub struct EmailConfig {
     pub smtp_tls: bool,
 }
 
-fn default_smtp_port() -> u16 { 587 }
-fn default_true() -> bool { true }
+fn default_smtp_port() -> u16 {
+    587
+}
+fn default_true() -> bool {
+    true
+}
 
-fn default_bind_address() -> String { "0.0.0.0:9000".to_string() }
-fn default_database_path() -> String { "./data/bugs.db".to_string() }
-fn default_artifacts_dir() -> String { "./data/artifacts".to_string() }
-fn default_retention_days() -> u32 { 90 }
-fn default_envelope_retention_hours() -> u32 { 24 }
-fn default_worker_threads() -> usize { 4 }
-fn default_synchronous() -> String { "NORMAL".to_string() }
-fn default_cache_size_mb() -> u32 { 64 }
-fn default_reader_connections() -> u32 { 8 }
-fn default_checkpoint_interval_batches() -> u32 { 10 }
-fn default_mmap_size_mb() -> u32 { 256 }
-fn default_max_raw_request_bytes() -> usize { 20 * 1024 * 1024 }
-fn default_max_envelope_bytes() -> usize { 10 * 1024 * 1024 }
-fn default_max_event_item_bytes() -> usize { 1024 * 1024 }
-fn default_max_attachment_bytes() -> usize { 10 * 1024 * 1024 }
-fn default_max_items_per_envelope() -> usize { 100 }
-fn default_max_tag_values_per_key() -> u32 { 1000 }
+fn default_bind_address() -> String {
+    "0.0.0.0:9000".to_string()
+}
+fn default_database_path() -> String {
+    "./data/bugs.db".to_string()
+}
+fn default_artifacts_dir() -> String {
+    "./data/artifacts".to_string()
+}
+fn default_retention_days() -> u32 {
+    90
+}
+fn default_envelope_retention_hours() -> u32 {
+    24
+}
+fn default_worker_threads() -> usize {
+    4
+}
+fn default_synchronous() -> String {
+    "NORMAL".to_string()
+}
+fn default_cache_size_mb() -> u32 {
+    64
+}
+fn default_reader_connections() -> u32 {
+    8
+}
+fn default_checkpoint_interval_batches() -> u32 {
+    10
+}
+fn default_mmap_size_mb() -> u32 {
+    256
+}
+fn default_max_raw_request_bytes() -> usize {
+    20 * 1024 * 1024
+}
+fn default_max_envelope_bytes() -> usize {
+    10 * 1024 * 1024
+}
+fn default_max_event_item_bytes() -> usize {
+    1024 * 1024
+}
+fn default_max_attachment_bytes() -> usize {
+    10 * 1024 * 1024
+}
+fn default_max_items_per_envelope() -> usize {
+    100
+}
+fn default_max_tag_values_per_key() -> u32 {
+    1000
+}
 
 impl Config {
     #[allow(clippy::result_large_err)]

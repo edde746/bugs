@@ -1,13 +1,23 @@
-use axum::{Router, Json, extract::{Path, State}, http::StatusCode, routing::get};
-use serde::{Deserialize, Serialize};
 use crate::AppState;
 use crate::models::alert::*;
+use axum::{
+    Json, Router,
+    extract::{Path, State},
+    http::StatusCode,
+    routing::get,
+};
+use serde::{Deserialize, Serialize};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/api/internal/projects/{slug}/alerts", get(list_alerts).post(create_alert))
-        .route("/api/internal/projects/{slug}/alerts/{alert_id}",
-            axum::routing::put(update_alert).delete(delete_alert))
+        .route(
+            "/api/internal/projects/{slug}/alerts",
+            get(list_alerts).post(create_alert),
+        )
+        .route(
+            "/api/internal/projects/{slug}/alerts/{alert_id}",
+            axum::routing::put(update_alert).delete(delete_alert),
+        )
 }
 
 async fn resolve_project(state: &AppState, slug: &str) -> Result<i64, (StatusCode, String)> {
@@ -15,14 +25,14 @@ async fn resolve_project(state: &AppState, slug: &str) -> Result<i64, (StatusCod
     if let Ok(id) = slug.parse::<i64>() {
         return Ok(id);
     }
-    let project: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM projects WHERE slug = ?"
-    )
-    .bind(slug)
-    .fetch_optional(state.db.reader())
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    Ok(project.ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?.0)
+    let project: Option<(i64,)> = sqlx::query_as("SELECT id FROM projects WHERE slug = ?")
+        .bind(slug)
+        .fetch_optional(state.db.reader())
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(project
+        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?
+        .0)
 }
 
 /// API response with parsed conditions/actions (not raw JSON strings)
@@ -40,10 +50,9 @@ struct AlertRuleResponse {
 }
 
 fn rule_to_response(rule: &AlertRule) -> AlertRuleResponse {
-    let conditions: Vec<AlertCondition> = serde_json::from_str(&rule.conditions)
-        .unwrap_or_default();
-    let actions: Vec<AlertAction> = serde_json::from_str(&rule.actions)
-        .unwrap_or_default();
+    let conditions: Vec<AlertCondition> =
+        serde_json::from_str(&rule.conditions).unwrap_or_default();
+    let actions: Vec<AlertAction> = serde_json::from_str(&rule.actions).unwrap_or_default();
 
     AlertRuleResponse {
         id: rule.id,
@@ -64,13 +73,12 @@ async fn list_alerts(
 ) -> Result<Json<Vec<AlertRuleResponse>>, (StatusCode, String)> {
     let project_id = resolve_project(&state, &slug).await?;
 
-    let rules: Vec<AlertRule> = sqlx::query_as(
-        "SELECT * FROM alert_rules WHERE project_id = ? ORDER BY created_at DESC"
-    )
-    .bind(project_id)
-    .fetch_all(state.db.reader())
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let rules: Vec<AlertRule> =
+        sqlx::query_as("SELECT * FROM alert_rules WHERE project_id = ? ORDER BY created_at DESC")
+            .bind(project_id)
+            .fetch_all(state.db.reader())
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(rules.iter().map(rule_to_response).collect()))
 }
@@ -84,7 +92,9 @@ struct CreateAlertInput {
     frequency: i64,
 }
 
-fn default_frequency() -> i64 { 1800 }
+fn default_frequency() -> i64 {
+    1800
+}
 
 async fn create_alert(
     State(state): State<AppState>,
@@ -129,15 +139,14 @@ async fn update_alert(
 ) -> Result<Json<AlertRuleResponse>, (StatusCode, String)> {
     let project_id = resolve_project(&state, &slug).await?;
 
-    let existing: AlertRule = sqlx::query_as(
-        "SELECT * FROM alert_rules WHERE id = ? AND project_id = ?"
-    )
-    .bind(alert_id)
-    .bind(project_id)
-    .fetch_optional(state.db.reader())
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-    .ok_or((StatusCode::NOT_FOUND, "Alert rule not found".to_string()))?;
+    let existing: AlertRule =
+        sqlx::query_as("SELECT * FROM alert_rules WHERE id = ? AND project_id = ?")
+            .bind(alert_id)
+            .bind(project_id)
+            .fetch_optional(state.db.reader())
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((StatusCode::NOT_FOUND, "Alert rule not found".to_string()))?;
 
     let name = input.name.unwrap_or(existing.name);
     let enabled = input.enabled.unwrap_or(existing.enabled);
@@ -157,7 +166,7 @@ async fn update_alert(
 
     let rule = sqlx::query_as::<_, AlertRule>(
         "UPDATE alert_rules SET name = ?, enabled = ?, conditions = ?, actions = ?, frequency = ? \
-         WHERE id = ? AND project_id = ? RETURNING *"
+         WHERE id = ? AND project_id = ? RETURNING *",
     )
     .bind(&name)
     .bind(enabled)
@@ -179,14 +188,12 @@ async fn delete_alert(
 ) -> Result<StatusCode, (StatusCode, String)> {
     let project_id = resolve_project(&state, &slug).await?;
 
-    let result = sqlx::query(
-        "DELETE FROM alert_rules WHERE id = ? AND project_id = ?"
-    )
-    .bind(alert_id)
-    .bind(project_id)
-    .execute(state.db.writer())
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let result = sqlx::query("DELETE FROM alert_rules WHERE id = ? AND project_id = ?")
+        .bind(alert_id)
+        .bind(project_id)
+        .execute(state.db.writer())
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     if result.rows_affected() == 0 {
         return Err((StatusCode::NOT_FOUND, "Alert rule not found".to_string()));

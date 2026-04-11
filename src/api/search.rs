@@ -1,11 +1,15 @@
-use axum::{Router, Json, extract::{Query, State}, http::StatusCode, routing::get};
-use serde::Deserialize;
 use crate::AppState;
 use crate::models::event::Event;
+use axum::{
+    Json, Router,
+    extract::{Query, State},
+    http::StatusCode,
+    routing::get,
+};
+use serde::Deserialize;
 
 pub fn routes() -> Router<AppState> {
-    Router::new()
-        .route("/api/internal/search", get(search_events))
+    Router::new().route("/api/internal/search", get(search_events))
 }
 
 #[derive(Debug, Deserialize)]
@@ -19,7 +23,10 @@ async fn search_events(
     Query(params): Query<SearchParams>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     if params.q.len() < 2 {
-        return Err((StatusCode::BAD_REQUEST, "Query must be at least 2 characters".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Query must be at least 2 characters".to_string(),
+        ));
     }
 
     // Resolve project param: could be numeric id or slug
@@ -27,14 +34,15 @@ async fn search_events(
         if let Ok(id) = project.parse::<i64>() {
             Some(id)
         } else {
-            let row: Option<(i64,)> = sqlx::query_as(
-                "SELECT id FROM projects WHERE slug = ?"
+            let row: Option<(i64,)> = sqlx::query_as("SELECT id FROM projects WHERE slug = ?")
+                .bind(project)
+                .fetch_optional(state.db.reader())
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            Some(
+                row.ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?
+                    .0,
             )
-            .bind(project)
-            .fetch_optional(state.db.reader())
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-            Some(row.ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?.0)
         }
     } else {
         None

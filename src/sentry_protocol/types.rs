@@ -131,7 +131,9 @@ pub struct Breadcrumb {
 
 /// Deserialize breadcrumbs from either `{"values": [...]}` or a bare `[...]`.
 /// The Node.js SDK sends a bare array, Python SDK sends the wrapped form.
-fn deserialize_breadcrumbs<'de, D>(deserializer: D) -> Result<Option<BreadcrumbsInterface>, D::Error>
+fn deserialize_breadcrumbs<'de, D>(
+    deserializer: D,
+) -> Result<Option<BreadcrumbsInterface>, D::Error>
 where
     D: Deserializer<'de>,
 {

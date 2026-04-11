@@ -1,7 +1,7 @@
 use sqlx::SqlitePool;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::time::{interval, Duration};
+use std::sync::atomic::{AtomicU64, Ordering};
+use tokio::time::{Duration, interval};
 use tracing::{debug, info, warn};
 
 pub struct CheckpointManager {

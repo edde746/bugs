@@ -1,20 +1,26 @@
+pub mod admin_auth;
+pub mod alerts;
+pub mod comments;
+pub mod events;
+pub mod frontend;
 pub mod ingest;
 pub mod ingest_auth;
-pub mod admin_auth;
+pub mod issues;
+pub mod performance;
 pub mod projects;
 pub mod releases;
-pub mod issues;
-pub mod events;
-pub mod alerts;
-pub mod stats;
 pub mod search;
-pub mod comments;
+pub mod stats;
 pub mod user_reports;
-pub mod performance;
-pub mod frontend;
 
-use axum::{Router, extract::State, http::{StatusCode, header}, middleware, response::Response};
 use crate::AppState;
+use axum::{
+    Router,
+    extract::State,
+    http::{StatusCode, header},
+    middleware,
+    response::Response,
+};
 
 pub fn router(state: &AppState) -> Router<AppState> {
     // Management routes that require admin auth
@@ -29,7 +35,10 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .merge(comments::routes())
         .merge(user_reports::routes())
         .merge(performance::routes())
-        .route_layer(middleware::from_fn_with_state(state.clone(), admin_auth_check));
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            admin_auth_check,
+        ));
 
     Router::new()
         .merge(ingest::routes())

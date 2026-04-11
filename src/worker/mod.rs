@@ -1,9 +1,9 @@
-pub mod processor;
-pub mod normalizer;
-pub mod fingerprint;
-pub mod symbolication;
-pub mod indexer;
 pub mod alerts;
+pub mod fingerprint;
+pub mod indexer;
+pub mod normalizer;
+pub mod processor;
+pub mod symbolication;
 
 use std::sync::Arc;
 use tokio::sync::mpsc;

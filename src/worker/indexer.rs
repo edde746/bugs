@@ -114,7 +114,11 @@ pub async fn index_event(
         );
         let mut query = sqlx::query(&sql);
         for (key, value) in chunk {
-            query = query.bind(event_row_id).bind(project_id).bind(key).bind(value);
+            query = query
+                .bind(event_row_id)
+                .bind(project_id)
+                .bind(key)
+                .bind(value);
         }
         query.execute(db.writer()).await?;
     }

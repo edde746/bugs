@@ -1,4 +1,4 @@
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions, SqliteConnectOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use std::str::FromStr;
 use tracing::{info, warn};
 
@@ -87,7 +87,8 @@ impl DbPool {
         info!(sqlite_version = %version.0, "SQLite initialized");
 
         // Parse version for allowlist check
-        let parts: Vec<u32> = version.0
+        let parts: Vec<u32> = version
+            .0
             .split('.')
             .filter_map(|p| p.parse().ok())
             .collect();
@@ -98,7 +99,10 @@ impl DbPool {
 
             // JSONB requires >= 3.45.0
             if ver < 3_045_000 {
-                warn!("SQLite {}.{}.{} is below 3.45.0 - JSONB not available", major, minor, patch);
+                warn!(
+                    "SQLite {}.{}.{} is below 3.45.0 - JSONB not available",
+                    major, minor, patch
+                );
             }
 
             // WAL fix allowlist: >= 3.51.3 OR (>= 3.50.7 AND < 3.51.0) OR (>= 3.44.6 AND < 3.45.0)

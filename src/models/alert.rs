@@ -18,8 +18,15 @@ pub struct AlertRule {
 pub enum AlertCondition {
     NewIssue,
     RegressionEvent,
-    FrequencyThreshold { threshold: u64, window_seconds: u64 },
-    EventAttribute { attribute: String, match_type: String, value: String },
+    FrequencyThreshold {
+        threshold: u64,
+        window_seconds: u64,
+    },
+    EventAttribute {
+        attribute: String,
+        match_type: String,
+        value: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

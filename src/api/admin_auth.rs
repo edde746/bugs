@@ -10,8 +10,7 @@ pub fn check_admin_token(token: &str, auth_header: Option<&str>) -> bool {
             if let Some(bearer) = h.strip_prefix("Bearer ") {
                 let candidate = bearer.trim().as_bytes();
                 let expected = token.as_bytes();
-                candidate.len() == expected.len()
-                    && candidate.ct_eq(expected).into()
+                candidate.len() == expected.len() && candidate.ct_eq(expected).into()
             } else {
                 false
             }

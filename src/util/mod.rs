@@ -1,3 +1,3 @@
+pub mod hash;
 pub mod id;
 pub mod time;
-pub mod hash;

@@ -1,13 +1,21 @@
-use axum::{Router, Json, extract::{Path, Query, State}, http::StatusCode, routing::get};
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use serde::Deserialize;
 use crate::AppState;
 use crate::models::issue::*;
+use axum::{
+    Json, Router,
+    extract::{Path, Query, State},
+    http::StatusCode,
+    routing::get,
+};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use serde::Deserialize;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/internal/projects/{slug}/issues", get(list_issues))
-        .route("/api/internal/issues/{id}", get(get_issue).put(update_issue).delete(delete_issue))
+        .route(
+            "/api/internal/issues/{id}",
+            get(get_issue).put(update_issue).delete(delete_issue),
+        )
 }
 
 #[derive(Deserialize)]
@@ -21,7 +29,9 @@ struct IssueQuery {
     limit: i64,
 }
 
-fn default_limit() -> i64 { 25 }
+fn default_limit() -> i64 {
+    25
+}
 
 #[derive(Deserialize, serde::Serialize)]
 struct CursorData {
@@ -35,7 +45,10 @@ fn decode_cursor(cursor: &str) -> Option<CursorData> {
 }
 
 fn encode_cursor(sort_value: &str, id: i64) -> String {
-    let data = CursorData { v: sort_value.to_string(), id };
+    let data = CursorData {
+        v: sort_value.to_string(),
+        id,
+    };
     let json = serde_json::to_vec(&data).unwrap();
     URL_SAFE_NO_PAD.encode(&json)
 }
@@ -45,13 +58,11 @@ async fn list_issues(
     Path(slug): Path<String>,
     Query(params): Query<IssueQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let project: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM projects WHERE slug = ?"
-    )
-    .bind(&slug)
-    .fetch_optional(state.db.reader())
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let project: Option<(i64,)> = sqlx::query_as("SELECT id FROM projects WHERE slug = ?")
+        .bind(&slug)
+        .fetch_optional(state.db.reader())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let project_id = project.ok_or(StatusCode::NOT_FOUND)?.0;
 
@@ -165,15 +176,18 @@ async fn update_issue(
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-                let data = input.resolved_in_release.as_ref().map(|r| {
-                    serde_json::json!({ "release": r }).to_string()
-                });
-                sqlx::query("INSERT INTO issue_activity (issue_id, kind, data) VALUES (?, 'resolved', ?)")
-                    .bind(id)
-                    .bind(&data)
-                    .execute(state.db.writer())
-                    .await
-                    .ok();
+                let data = input
+                    .resolved_in_release
+                    .as_ref()
+                    .map(|r| serde_json::json!({ "release": r }).to_string());
+                sqlx::query(
+                    "INSERT INTO issue_activity (issue_id, kind, data) VALUES (?, 'resolved', ?)",
+                )
+                .bind(id)
+                .bind(&data)
+                .execute(state.db.writer())
+                .await
+                .ok();
             }
             "unresolved" => {
                 sqlx::query(
@@ -200,10 +214,7 @@ async fn update_issue(
     get_issue(State(state), Path(id)).await
 }
 
-async fn delete_issue(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-) -> StatusCode {
+async fn delete_issue(State(state): State<AppState>, Path(id): Path<i64>) -> StatusCode {
     match sqlx::query("DELETE FROM issues WHERE id = ?")
         .bind(id)
         .execute(state.db.writer())

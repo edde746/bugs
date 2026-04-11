@@ -6,7 +6,11 @@ pub fn parse_timestamp(ts: &serde_json::Value) -> Option<String> {
         serde_json::Value::String(s) => {
             // Try ISO 8601 first
             if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
-                return Some(dt.with_timezone(&Utc).format("%Y-%m-%dT%H:%M:%SZ").to_string());
+                return Some(
+                    dt.with_timezone(&Utc)
+                        .format("%Y-%m-%dT%H:%M:%SZ")
+                        .to_string(),
+                );
             }
             // Try parsing as float string
             if let Ok(f) = s.parse::<f64>() {
@@ -14,9 +18,7 @@ pub fn parse_timestamp(ts: &serde_json::Value) -> Option<String> {
             }
             None
         }
-        serde_json::Value::Number(n) => {
-            n.as_f64().and_then(timestamp_from_float)
-        }
+        serde_json::Value::Number(n) => n.as_f64().and_then(timestamp_from_float),
         _ => None,
     }
 }
@@ -47,13 +49,19 @@ mod tests {
     #[test]
     fn test_parse_rfc3339() {
         let ts = json!("2026-04-11T14:23:07Z");
-        assert_eq!(parse_timestamp(&ts), Some("2026-04-11T14:23:07Z".to_string()));
+        assert_eq!(
+            parse_timestamp(&ts),
+            Some("2026-04-11T14:23:07Z".to_string())
+        );
     }
 
     #[test]
     fn test_parse_rfc3339_with_offset() {
         let ts = json!("2026-04-11T14:23:07+02:00");
-        assert_eq!(parse_timestamp(&ts), Some("2026-04-11T12:23:07Z".to_string()));
+        assert_eq!(
+            parse_timestamp(&ts),
+            Some("2026-04-11T12:23:07Z".to_string())
+        );
     }
 
     #[test]

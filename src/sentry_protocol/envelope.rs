@@ -62,7 +62,9 @@ impl Envelope {
             return Err(EnvelopeError::Empty);
         }
 
-        let first_newline = data.iter().position(|&b| b == b'\n')
+        let first_newline = data
+            .iter()
+            .position(|&b| b == b'\n')
             .ok_or_else(|| EnvelopeError::InvalidHeader("no newline found".into()))?;
 
         let header_line = &data[..first_newline];
@@ -75,12 +77,17 @@ impl Envelope {
 
         while cursor < remaining.len() {
             // Skip trailing whitespace/newlines
-            if remaining[cursor..].iter().all(|&b| b == b'\n' || b == b'\r') {
+            if remaining[cursor..]
+                .iter()
+                .all(|&b| b == b'\n' || b == b'\r')
+            {
                 break;
             }
 
             // Find item header line
-            let header_end = remaining[cursor..].iter().position(|&b| b == b'\n')
+            let header_end = remaining[cursor..]
+                .iter()
+                .position(|&b| b == b'\n')
                 .ok_or(EnvelopeError::IncompletePayload)?;
 
             let item_header_bytes = &remaining[cursor..cursor + header_end];
@@ -97,7 +104,9 @@ impl Envelope {
                 len
             } else {
                 // No explicit length: read until next newline
-                remaining[cursor..].iter().position(|&b| b == b'\n')
+                remaining[cursor..]
+                    .iter()
+                    .position(|&b| b == b'\n')
                     .unwrap_or(remaining.len() - cursor)
             };
 
@@ -114,7 +123,10 @@ impl Envelope {
                 cursor += 1;
             }
 
-            items.push(EnvelopeItem { headers: item_headers, payload });
+            items.push(EnvelopeItem {
+                headers: item_headers,
+                payload,
+            });
         }
 
         Ok(Envelope { headers, items })
