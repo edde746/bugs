@@ -65,42 +65,23 @@ async fn mark_failed(db: &DbPool, envelope_id: i64, error_msg: &str) {
         error_msg
     };
 
-    // Check current attempts to decide: dead-letter after 5
-    let current: Option<(i64,)> = sqlx::query_as(
-        "SELECT attempts FROM event_envelopes WHERE id = ?"
-    )
-    .bind(envelope_id)
-    .fetch_optional(db.reader())
-    .await
-    .unwrap_or(None);
-
-    let attempts = current.map(|r| r.0).unwrap_or(0);
-
-    if attempts >= 4 {
-        // 5th failure -> dead letter (no more retries)
-        let _ = sqlx::query(
-            "UPDATE event_envelopes SET state = 'dead', attempts = attempts + 1, last_error = ? WHERE id = ?",
-        )
-        .bind(truncated)
-        .bind(envelope_id)
-        .execute(db.writer())
-        .await;
-    } else {
-        // Exponential backoff: 5s, 10s, 20s, 40s, ... capped at 300s
-        let _ = sqlx::query(
-            "UPDATE event_envelopes SET \
-                state = 'failed', \
-                attempts = attempts + 1, \
-                last_error = ?, \
-                next_attempt_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', \
+    // Atomic update: dead-letter after 5 attempts, otherwise retry with exponential backoff.
+    // No separate read — avoids TOCTOU race with concurrent workers.
+    let _ = sqlx::query(
+        "UPDATE event_envelopes SET \
+            attempts = attempts + 1, \
+            last_error = ?, \
+            state = CASE WHEN attempts >= 4 THEN 'dead' ELSE 'failed' END, \
+            next_attempt_at = CASE WHEN attempts >= 4 THEN NULL \
+                ELSE strftime('%Y-%m-%dT%H:%M:%SZ', 'now', \
                     '+' || CAST(MIN(300, 5 * (1 << MIN(attempts, 8))) AS TEXT) || ' seconds') \
-             WHERE id = ?",
-        )
-        .bind(truncated)
-        .bind(envelope_id)
-        .execute(db.writer())
-        .await;
-    }
+                END \
+         WHERE id = ?",
+    )
+    .bind(truncated)
+    .bind(envelope_id)
+    .execute(db.writer())
+    .await;
 }
 
 async fn process_inner(

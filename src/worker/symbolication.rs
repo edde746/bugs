@@ -14,6 +14,10 @@ use crate::sentry_protocol::types::SentryEvent;
 static SM_CACHE: Lazy<Mutex<LruCache<String, Arc<SourceMap>>>> =
     Lazy::new(|| Mutex::new(LruCache::new(NonZeroUsize::new(64).unwrap())));
 
+/// Cache release file lookups to avoid repeated DB queries for the same release version.
+static RELEASE_FILES_CACHE: Lazy<Mutex<LruCache<String, Arc<Vec<ReleaseFile>>>>> =
+    Lazy::new(|| Mutex::new(LruCache::new(NonZeroUsize::new(32).unwrap())));
+
 pub async fn symbolicate_event(
     event: &mut SentryEvent,
     db: &DbPool,
@@ -25,24 +29,40 @@ pub async fn symbolicate_event(
         _ => return Ok(()),
     };
 
-    // 2. Look up the release in DB
-    let release_row: Option<(i64,)> =
-        sqlx::query_as("SELECT id FROM releases WHERE org_id = 1 AND version = ?")
-            .bind(&release_version)
-            .fetch_optional(db.reader())
-            .await?;
-
-    let release_id = match release_row {
-        Some((id,)) => id,
-        None => return Ok(()),
+    // 2. Load release files (cached by release version to avoid repeated DB lookups)
+    let release_files = {
+        let mut cache = RELEASE_FILES_CACHE.lock().unwrap();
+        cache.get(&release_version).cloned()
     };
 
-    // 3. Load release files
-    let release_files: Vec<ReleaseFile> =
-        sqlx::query_as("SELECT * FROM release_files WHERE release_id = ?")
-            .bind(release_id)
-            .fetch_all(db.reader())
-            .await?;
+    let release_files = match release_files {
+        Some(cached) => cached,
+        None => {
+            let release_row: Option<(i64,)> =
+                sqlx::query_as("SELECT id FROM releases WHERE org_id = 1 AND version = ?")
+                    .bind(&release_version)
+                    .fetch_optional(db.reader())
+                    .await?;
+
+            let release_id = match release_row {
+                Some((id,)) => id,
+                None => return Ok(()),
+            };
+
+            let files: Vec<ReleaseFile> =
+                sqlx::query_as("SELECT * FROM release_files WHERE release_id = ?")
+                    .bind(release_id)
+                    .fetch_all(db.reader())
+                    .await?;
+
+            let files = Arc::new(files);
+            {
+                let mut cache = RELEASE_FILES_CACHE.lock().unwrap();
+                cache.put(release_version.clone(), Arc::clone(&files));
+            }
+            files
+        }
+    };
 
     if release_files.is_empty() {
         return Ok(());

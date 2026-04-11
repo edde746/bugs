@@ -26,6 +26,7 @@ export async function apiRequest<T>(
     const body = await response.json().catch(() => null);
     throw new ApiError(response.status, response.statusText, body);
   }
+  if (response.status === 204) return undefined as T;
   return response.json();
 }
 

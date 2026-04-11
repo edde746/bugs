@@ -19,6 +19,7 @@ pub fn spawn(
     db: DbPool,
     config: Arc<Config>,
     checkpoint: Arc<CheckpointManager>,
+    tx: mpsc::Sender<WorkerMessage>,
     rx: mpsc::Receiver<WorkerMessage>,
 ) {
     let num_workers = config.worker_threads;
@@ -55,13 +56,12 @@ pub fn spawn(
     // Spawn poller for missed/failed/stuck envelopes
     let db_poll = db.clone();
     let config_poll = config.clone();
-    let checkpoint_poll = checkpoint.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
         let mut tick_count: u64 = 0;
         loop {
             interval.tick().await;
-            poll_envelopes(&db_poll, &config_poll, &checkpoint_poll).await;
+            poll_envelopes(&db_poll, &tx).await;
 
             tick_count += 1;
             // Every ~60 seconds (12 ticks * 5s)
@@ -104,27 +104,46 @@ async fn unmute_expired_issues(db: &DbPool) {
 }
 
 /// Periodically recalculate p50/p95 for transaction groups using recent data.
+/// Reads percentiles from a reader connection, then writes in a single batch on the writer.
 async fn update_transaction_percentiles(db: &DbPool) {
-    // Only recalculate for groups that had recent activity (last hour)
-    sqlx::query(
-        "UPDATE transaction_groups SET \
-            p50_duration_ms = ( \
-                SELECT duration_ms FROM transactions WHERE group_id = transaction_groups.id \
-                ORDER BY duration_ms LIMIT 1 \
-                OFFSET (SELECT MIN(count, (SELECT COUNT(*) FROM transactions t2 WHERE t2.group_id = transaction_groups.id)) / 2 \
-                        FROM transaction_groups tg2 WHERE tg2.id = transaction_groups.id) \
-            ), \
-            p95_duration_ms = ( \
-                SELECT duration_ms FROM transactions WHERE group_id = transaction_groups.id \
-                ORDER BY duration_ms LIMIT 1 \
-                OFFSET (SELECT MIN(count, (SELECT COUNT(*) FROM transactions t2 WHERE t2.group_id = transaction_groups.id)) * 95 / 100 \
-                        FROM transaction_groups tg2 WHERE tg2.id = transaction_groups.id) \
-            ) \
+    // Read active group IDs from a reader (no writer contention)
+    let groups: Vec<(i64,)> = sqlx::query_as(
+        "SELECT id FROM transaction_groups \
          WHERE last_seen >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 hour')",
     )
-    .execute(db.writer())
+    .fetch_all(db.reader())
     .await
-    .ok();
+    .unwrap_or_default();
+
+    for (group_id,) in groups {
+        // Compute percentiles on reader
+        let durations: Vec<(f64,)> = sqlx::query_as(
+            "SELECT duration_ms FROM transactions WHERE group_id = ? ORDER BY duration_ms",
+        )
+        .bind(group_id)
+        .fetch_all(db.reader())
+        .await
+        .unwrap_or_default();
+
+        if durations.is_empty() {
+            continue;
+        }
+
+        let n = durations.len();
+        let p50 = durations[n / 2].0;
+        let p95 = durations[(n * 95 / 100).min(n - 1)].0;
+
+        // Single targeted UPDATE on writer
+        sqlx::query(
+            "UPDATE transaction_groups SET p50_duration_ms = ?, p95_duration_ms = ? WHERE id = ?",
+        )
+        .bind(p50)
+        .bind(p95)
+        .bind(group_id)
+        .execute(db.writer())
+        .await
+        .ok();
+    }
 }
 
 /// Clean up old transaction rows to prevent unbounded growth.
@@ -143,7 +162,7 @@ async fn cleanup_old_transactions(db: &DbPool, retention_days: u32) {
     }
 }
 
-async fn poll_envelopes(db: &DbPool, config: &Config, checkpoint: &CheckpointManager) {
+async fn poll_envelopes(db: &DbPool, tx: &mpsc::Sender<WorkerMessage>) {
     let envelopes: Vec<(i64,)> = sqlx::query_as(
         "SELECT id FROM event_envelopes \
          WHERE (state = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%SZ','now'))) \
@@ -156,6 +175,6 @@ async fn poll_envelopes(db: &DbPool, config: &Config, checkpoint: &CheckpointMan
     .unwrap_or_default();
 
     for (id,) in envelopes {
-        processor::process_envelope(db, config, checkpoint, id).await;
+        let _ = tx.try_send(id);
     }
 }

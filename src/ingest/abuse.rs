@@ -36,6 +36,11 @@ impl RateLimiter {
         let mut windows = self.windows.lock().await;
         let now = Instant::now();
 
+        // Periodically evict stale entries to prevent unbounded growth
+        if windows.len() > 100 {
+            windows.retain(|_, w| now.duration_since(w.window_start).as_secs() < 120);
+        }
+
         let window = windows.entry(key.to_string()).or_insert(RateWindow {
             count: 0,
             window_start: now,

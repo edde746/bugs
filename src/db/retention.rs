@@ -48,9 +48,9 @@ async fn run_cleanup(
     .execute(writer)
     .await?;
 
-    // Delete orphaned issues
+    // Delete orphaned issues (NOT EXISTS is cheaper than NOT IN on large tables)
     let issues_deleted = sqlx::query(
-        "DELETE FROM issues WHERE id NOT IN (SELECT DISTINCT issue_id FROM events WHERE issue_id IS NOT NULL)"
+        "DELETE FROM issues WHERE NOT EXISTS (SELECT 1 FROM events WHERE events.issue_id = issues.id)"
     )
     .execute(writer)
     .await?;

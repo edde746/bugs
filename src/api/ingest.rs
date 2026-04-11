@@ -104,7 +104,7 @@ async fn ingest_envelope(
         .unwrap_or_else(generate_event_id);
 
     // Store raw envelope (use key.project_id, not URL param, as source of truth)
-    sqlx::query(
+    let insert_result = sqlx::query(
         "INSERT OR IGNORE INTO event_envelopes (project_id, event_id, body, state) VALUES (?, ?, ?, 'pending')"
     )
     .bind(key.project_id)
@@ -114,18 +114,22 @@ async fn ingest_envelope(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Storage failed: {e}")))?;
 
-    // Best-effort channel send (envelope is durable in DB; poller picks up if channel full)
-    let envelope_id: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM event_envelopes WHERE project_id = ? AND event_id = ?"
-    )
-    .bind(key.project_id)
-    .bind(&event_id)
-    .fetch_optional(state.db.reader())
-    .await
-    .unwrap_or(None);
+    // Only queue for processing if we actually inserted a new envelope.
+    // Duplicate submissions (rows_affected == 0) are ignored — the existing
+    // envelope is already queued or being processed, and the poller handles recovery.
+    if insert_result.rows_affected() > 0 {
+        let envelope_id: Option<(i64,)> = sqlx::query_as(
+            "SELECT id FROM event_envelopes WHERE project_id = ? AND event_id = ?"
+        )
+        .bind(key.project_id)
+        .bind(&event_id)
+        .fetch_optional(state.db.reader())
+        .await
+        .unwrap_or(None);
 
-    if let Some((id,)) = envelope_id {
-        let _ = state.worker_tx.try_send(id);
+        if let Some((id,)) = envelope_id {
+            let _ = state.worker_tx.try_send(id);
+        }
     }
 
     Ok((StatusCode::OK, Json(json!({ "id": event_id }))))

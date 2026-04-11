@@ -55,6 +55,7 @@ async fn list_issues(
 
     let project_id = project.ok_or(StatusCode::NOT_FOUND)?.0;
 
+    let limit = params.limit.min(100);
     let status = params.status.as_deref().unwrap_or("unresolved");
     let sort_col = match params.sort.as_deref() {
         Some("first_seen") => "first_seen",
@@ -74,7 +75,7 @@ async fn list_issues(
             .bind(&cursor.v)
             .bind(&cursor.v)
             .bind(cursor.id)
-            .bind(params.limit + 1)
+            .bind(limit + 1)
             .fetch_all(state.db.reader())
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -88,14 +89,14 @@ async fn list_issues(
         ))
         .bind(project_id)
         .bind(status)
-        .bind(params.limit + 1)
+        .bind(limit + 1)
         .fetch_all(state.db.reader())
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };
 
-    let has_next = issues.len() as i64 > params.limit;
-    let items: Vec<&Issue> = issues.iter().take(params.limit as usize).collect();
+    let has_next = issues.len() as i64 > limit;
+    let items: Vec<&Issue> = issues.iter().take(limit as usize).collect();
     let next_cursor = if has_next {
         items.last().map(|i| {
             let sort_value = match sort_col {

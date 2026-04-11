@@ -44,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     checkpoint.clone().spawn_quiet_checkpoint_task();
 
-    bugs::worker::spawn(db.clone(), config.clone(), checkpoint.clone(), worker_rx);
+    bugs::worker::spawn(db.clone(), config.clone(), checkpoint.clone(), worker_tx.clone(), worker_rx);
 
     bugs::db::retention::spawn_retention_task(
         db.writer().clone(),
@@ -78,7 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .layer(SetResponseHeaderLayer::overriding(
             header::CONTENT_SECURITY_POLICY,
             header::HeaderValue::from_static(
-                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
             ),
         ))
         .with_state(state);

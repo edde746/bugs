@@ -105,53 +105,45 @@ pub async fn index_event(
         seen_keys.insert(key_val)
     });
 
-    // Insert tags into DB
+    // Batch-insert event_tags in chunks to reduce DB round-trips
+    for chunk in tags.chunks(10) {
+        let placeholders: Vec<&str> = chunk.iter().map(|_| "(?, ?, ?, ?)").collect();
+        let sql = format!(
+            "INSERT INTO event_tags (event_id, project_id, key, value) VALUES {}",
+            placeholders.join(", ")
+        );
+        let mut query = sqlx::query(&sql);
+        for (key, value) in chunk {
+            query = query.bind(event_row_id).bind(project_id).bind(key).bind(value);
+        }
+        query.execute(db.writer()).await?;
+    }
+
+    // Collect unique keys that need tag_keys recount
+    let mut keys_needing_recount = std::collections::HashSet::new();
+
+    // UPSERT tag_values and track which keys got new values.
+    // Respects cardinality cap: only inserts new values if under max_values.
     for (key, value) in &tags {
-        // Insert into event_tags
-        sqlx::query(
-            "INSERT INTO event_tags (event_id, project_id, key, value) VALUES (?, ?, ?, ?)",
+        // Try to insert new value, but only if under the cardinality cap.
+        // Uses INSERT ... SELECT with a WHERE clause to enforce the cap atomically.
+        let insert_result = sqlx::query(
+            "INSERT OR IGNORE INTO tag_values (project_id, key, value, times_seen, last_seen) \
+             SELECT ?, ?, ?, 1, ? \
+             WHERE COALESCE((SELECT values_seen FROM tag_keys WHERE project_id = ? AND key = ?), 0) < ?",
         )
-        .bind(event_row_id)
         .bind(project_id)
         .bind(key)
         .bind(value)
+        .bind(&now)
+        .bind(project_id)
+        .bind(key)
+        .bind(max_values as i64)
         .execute(db.writer())
         .await?;
 
-        // UPSERT tag_keys: increment values_seen only on new tag_values row
-        // We do the tag_values upsert first to know if it's a new value
-        // But we can just always upsert tag_keys since values_seen is an approximation
-        // managed by counting actual distinct values.
-
-        // Check cardinality cap: query current values_seen for this key
-        let current_values: Option<(i64,)> = sqlx::query_as(
-            "SELECT values_seen FROM tag_keys WHERE project_id = ? AND key = ?",
-        )
-        .bind(project_id)
-        .bind(key)
-        .fetch_optional(db.reader())
-        .await?;
-
-        let values_seen = current_values.map(|r| r.0).unwrap_or(0);
-
-        // UPSERT tag_values (with cardinality cap)
-        if values_seen < max_values as i64 {
-            // Insert or update the tag value
-            sqlx::query(
-                "INSERT INTO tag_values (project_id, key, value, times_seen, last_seen) \
-                 VALUES (?, ?, ?, 1, ?) \
-                 ON CONFLICT(project_id, key, value) DO UPDATE SET \
-                    times_seen = times_seen + 1, \
-                    last_seen = excluded.last_seen",
-            )
-            .bind(project_id)
-            .bind(key)
-            .bind(value)
-            .bind(&now)
-            .execute(db.writer())
-            .await?;
-        } else {
-            // Over cardinality cap: only update existing values, don't create new ones
+        if insert_result.rows_affected() == 0 {
+            // Either value already existed or over cardinality cap — bump counter if exists
             sqlx::query(
                 "UPDATE tag_values SET times_seen = times_seen + 1, last_seen = ? \
                  WHERE project_id = ? AND key = ? AND value = ?",
@@ -162,9 +154,14 @@ pub async fn index_event(
             .bind(value)
             .execute(db.writer())
             .await?;
+        } else {
+            // New value inserted — this key needs a recount
+            keys_needing_recount.insert(key.clone());
         }
+    }
 
-        // UPSERT tag_keys: recount distinct values
+    // Only recount tag_keys for keys that actually got new values
+    for key in &keys_needing_recount {
         sqlx::query(
             "INSERT INTO tag_keys (project_id, key, values_seen) \
              VALUES (?, ?, (SELECT COUNT(*) FROM tag_values WHERE project_id = ? AND key = ?)) \

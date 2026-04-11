@@ -284,7 +284,7 @@ async fn start_test_server() -> (String, tokio::task::JoinHandle<()>) {
                 bugs::db::checkpoint::CheckpointManager::new(db.writer().clone(), 10)
             );
 
-            bugs::worker::spawn(db.clone(), config.clone(), checkpoint.clone(), worker_rx);
+            bugs::worker::spawn(db.clone(), config.clone(), checkpoint.clone(), worker_tx.clone(), worker_rx);
 
             let state = bugs::AppState {
                 db,
