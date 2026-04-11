@@ -72,27 +72,45 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
 
             return (
               <div class="stacktrace__frame" data-in-app={frame.in_app ?? false}>
-                <button
-                  class="stacktrace__frame-btn"
-                  onClick={() => toggleFrame(index())}
-                >
-                  <span class="stacktrace__toggle-icon">
-                    {isExpanded() ? <IconChevronDown /> : <IconChevronRight />}
-                  </span>
-                  <span class="stacktrace__fn-name">
-                    {frame.function ?? "<anonymous>"}
-                  </span>
-                  <span class="stacktrace__file-name">
-                    {frame.filename ?? frame.abs_path ?? frame.module ?? "unknown"}
-                    <Show when={frame.lineno}>
-                      :{frame.lineno}
-                      <Show when={frame.colno}>:{frame.colno}</Show>
+                <Show when={hasContext()} fallback={
+                  <div class="stacktrace__frame-btn stacktrace__frame-btn--static">
+                    <span class="stacktrace__fn-name">
+                      {frame.function ?? "<anonymous>"}
+                    </span>
+                    <span class="stacktrace__file-name">
+                      {frame.filename ?? frame.abs_path ?? frame.module ?? "unknown"}
+                      <Show when={frame.lineno}>
+                        :{frame.lineno}
+                        <Show when={frame.colno}>:{frame.colno}</Show>
+                      </Show>
+                    </span>
+                    <Show when={frame.in_app}>
+                      <span class="stacktrace__app-tag">app</span>
                     </Show>
-                  </span>
-                  <Show when={frame.in_app}>
-                    <span class="stacktrace__app-tag">app</span>
-                  </Show>
-                </button>
+                  </div>
+                }>
+                  <button
+                    class="stacktrace__frame-btn"
+                    onClick={() => toggleFrame(index())}
+                  >
+                    <span class="stacktrace__toggle-icon">
+                      {isExpanded() ? <IconChevronDown /> : <IconChevronRight />}
+                    </span>
+                    <span class="stacktrace__fn-name">
+                      {frame.function ?? "<anonymous>"}
+                    </span>
+                    <span class="stacktrace__file-name">
+                      {frame.filename ?? frame.abs_path ?? frame.module ?? "unknown"}
+                      <Show when={frame.lineno}>
+                        :{frame.lineno}
+                        <Show when={frame.colno}>:{frame.colno}</Show>
+                      </Show>
+                    </span>
+                    <Show when={frame.in_app}>
+                      <span class="stacktrace__app-tag">app</span>
+                    </Show>
+                  </button>
+                </Show>
                 <Show when={isExpanded() && hasContext()}>
                   <div class="stacktrace__context">
                     <pre>

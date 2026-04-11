@@ -1016,6 +1016,15 @@ label.field-label--sm {
   background: var(--color-surface-2);
 }
 
+.stacktrace__frame-btn--static {
+  cursor: default;
+  padding-left: 36px;
+}
+
+.stacktrace__frame-btn--static:hover {
+  background: none;
+}
+
 .stacktrace__toggle-icon {
   color: var(--color-text-secondary);
   flex-shrink: 0;
