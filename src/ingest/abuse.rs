@@ -49,3 +49,42 @@ impl RateLimiter {
         true
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_rate_limiter_allows_under_limit() {
+        let rl = RateLimiter::new();
+        assert!(rl.check("key1", 10).await);
+        assert!(rl.check("key1", 10).await);
+        assert!(rl.check("key1", 10).await);
+    }
+
+    #[tokio::test]
+    async fn test_rate_limiter_blocks_over_limit() {
+        let rl = RateLimiter::new();
+        for _ in 0..5 {
+            assert!(rl.check("key1", 5).await);
+        }
+        // 6th should be blocked
+        assert!(!rl.check("key1", 5).await);
+    }
+
+    #[tokio::test]
+    async fn test_rate_limiter_separate_keys() {
+        let rl = RateLimiter::new();
+        for _ in 0..5 {
+            rl.check("key1", 5).await;
+        }
+        // key2 should still be allowed
+        assert!(rl.check("key2", 5).await);
+    }
+
+    #[tokio::test]
+    async fn test_rate_limiter_zero_limit_allows_all() {
+        let rl = RateLimiter::new();
+        assert!(rl.check("key1", 0).await);
+    }
+}

@@ -84,3 +84,36 @@ fn parse_sentry_auth(header: &str) -> Option<SentryAuth> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_sentry_auth_standard() {
+        let auth = parse_sentry_auth("Sentry sentry_key=abc123, sentry_version=7, sentry_client=raven-js/1.0").unwrap();
+        assert_eq!(auth.sentry_key, "abc123");
+    }
+
+    #[test]
+    fn test_parse_sentry_auth_minimal() {
+        let auth = parse_sentry_auth("Sentry sentry_key=mykey").unwrap();
+        assert_eq!(auth.sentry_key, "mykey");
+    }
+
+    #[test]
+    fn test_parse_sentry_auth_dsn_prefix() {
+        let auth = parse_sentry_auth("DSN sentry_key=key456").unwrap();
+        assert_eq!(auth.sentry_key, "key456");
+    }
+
+    #[test]
+    fn test_parse_sentry_auth_no_key() {
+        assert!(parse_sentry_auth("Sentry sentry_version=7").is_none());
+    }
+
+    #[test]
+    fn test_parse_sentry_auth_empty() {
+        assert!(parse_sentry_auth("").is_none());
+    }
+}

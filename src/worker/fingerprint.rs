@@ -103,3 +103,114 @@ pub fn derive_culprit(event: &SentryEvent) -> Option<String> {
     }
     event.transaction.clone()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sentry_protocol::types::*;
+
+    fn make_exception_event(exc_type: &str, value: &str, func: &str) -> SentryEvent {
+        SentryEvent {
+            exception: Some(ExceptionInterface {
+                values: vec![ExceptionValue {
+                    exception_type: Some(exc_type.to_string()),
+                    value: Some(value.to_string()),
+                    module: None,
+                    stacktrace: Some(Stacktrace {
+                        frames: vec![StackFrame {
+                            filename: Some("app.js".to_string()),
+                            function: Some(func.to_string()),
+                            module: None,
+                            lineno: Some(42),
+                            colno: None,
+                            abs_path: None,
+                            in_app: Some(true),
+                            context_line: None,
+                            pre_context: None,
+                            post_context: None,
+                        }],
+                    }),
+                }],
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_same_exception_same_fingerprint() {
+        let e1 = make_exception_event("TypeError", "null ref", "handleClick");
+        let e2 = make_exception_event("TypeError", "null ref", "handleClick");
+        assert_eq!(compute_fingerprint(&e1), compute_fingerprint(&e2));
+    }
+
+    #[test]
+    fn test_different_exception_different_fingerprint() {
+        let e1 = make_exception_event("TypeError", "null ref", "handleClick");
+        let e2 = make_exception_event("RangeError", "out of bounds", "process");
+        assert_ne!(compute_fingerprint(&e1), compute_fingerprint(&e2));
+    }
+
+    #[test]
+    fn test_client_fingerprint_overrides() {
+        let mut e1 = make_exception_event("TypeError", "a", "fn1");
+        let mut e2 = make_exception_event("RangeError", "b", "fn2");
+        e1.fingerprint = Some(vec!["custom-group".to_string()]);
+        e2.fingerprint = Some(vec!["custom-group".to_string()]);
+        assert_eq!(compute_fingerprint(&e1), compute_fingerprint(&e2));
+    }
+
+    #[test]
+    fn test_message_fingerprint() {
+        let e1 = SentryEvent {
+            message: Some("Connection timeout".to_string()),
+            ..Default::default()
+        };
+        let e2 = SentryEvent {
+            message: Some("Connection timeout".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(compute_fingerprint(&e1), compute_fingerprint(&e2));
+
+        let e3 = SentryEvent {
+            message: Some("Different message".to_string()),
+            ..Default::default()
+        };
+        assert_ne!(compute_fingerprint(&e1), compute_fingerprint(&e3));
+    }
+
+    #[test]
+    fn test_derive_title_exception() {
+        let e = make_exception_event("TypeError", "Cannot read x", "fn");
+        assert_eq!(derive_title(&e), "TypeError: Cannot read x");
+    }
+
+    #[test]
+    fn test_derive_title_message() {
+        let e = SentryEvent {
+            message: Some("Hello world".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(derive_title(&e), "Hello world");
+    }
+
+    #[test]
+    fn test_derive_title_empty() {
+        let e = SentryEvent::default();
+        assert_eq!(derive_title(&e), "<untitled>");
+    }
+
+    #[test]
+    fn test_derive_culprit() {
+        let e = make_exception_event("TypeError", "err", "handleClick");
+        assert_eq!(derive_culprit(&e), Some("app.js in handleClick".to_string()));
+    }
+
+    #[test]
+    fn test_derive_culprit_no_exception() {
+        let e = SentryEvent {
+            transaction: Some("/api/users".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(derive_culprit(&e), Some("/api/users".to_string()));
+    }
+}

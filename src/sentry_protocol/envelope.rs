@@ -116,3 +116,68 @@ impl Envelope {
         Ok(Envelope { headers, items })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_event_id() {
+        let data = b"{\"event_id\":\"abc123\"}\n{\"type\":\"event\"}\n{}";
+        assert_eq!(extract_event_id(data), Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn test_extract_event_id_missing() {
+        let data = b"{\"dsn\":\"https://key@host/1\"}\n{\"type\":\"event\"}\n{}";
+        assert_eq!(extract_event_id(data), None);
+    }
+
+    #[test]
+    fn test_parse_single_event_with_length() {
+        // {"level":"error"} is exactly 16 bytes
+        let payload = b"{\"level\":\"error\"}";
+        let envelope_str = format!(
+            "{{\"event_id\":\"aabb\"}}\n{{\"type\":\"event\",\"length\":{}}}\n{}\n",
+            payload.len(),
+            std::str::from_utf8(payload).unwrap()
+        );
+        let parsed = Envelope::parse(envelope_str.as_bytes()).unwrap();
+        assert_eq!(parsed.items.len(), 1);
+        assert_eq!(parsed.items[0].headers.item_type, "event");
+        assert_eq!(parsed.items[0].payload.as_ref(), payload);
+    }
+
+    #[test]
+    fn test_parse_multiple_items() {
+        let envelope = b"{\"event_id\":\"aabb\"}\n\
+            {\"type\":\"event\",\"length\":2}\n\
+            {}\n\
+            {\"type\":\"attachment\",\"length\":5}\nhello\n";
+        let parsed = Envelope::parse(envelope).unwrap();
+        assert_eq!(parsed.items.len(), 2);
+        assert_eq!(parsed.items[0].headers.item_type, "event");
+        assert_eq!(parsed.items[1].headers.item_type, "attachment");
+        assert_eq!(parsed.items[1].payload.as_ref(), b"hello");
+    }
+
+    #[test]
+    fn test_parse_no_length_uses_newline() {
+        let envelope = b"{\"event_id\":\"aabb\"}\n{\"type\":\"event\"}\n{\"msg\":\"hi\"}\n";
+        let parsed = Envelope::parse(envelope).unwrap();
+        assert_eq!(parsed.items.len(), 1);
+        assert_eq!(parsed.items[0].payload.as_ref(), b"{\"msg\":\"hi\"}");
+    }
+
+    #[test]
+    fn test_parse_empty_envelope() {
+        assert!(Envelope::parse(b"").is_err());
+    }
+
+    #[test]
+    fn test_parse_header_only() {
+        let envelope = b"{\"event_id\":\"aabb\"}\n";
+        let parsed = Envelope::parse(envelope).unwrap();
+        assert_eq!(parsed.items.len(), 0);
+    }
+}

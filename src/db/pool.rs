@@ -208,3 +208,54 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
 
     statements
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_split_simple_statements() {
+        let sql = "CREATE TABLE foo (id INTEGER);\nCREATE TABLE bar (id INTEGER);";
+        let stmts = split_sql_statements(sql);
+        assert_eq!(stmts.len(), 2);
+        assert!(stmts[0].starts_with("CREATE TABLE foo"));
+        assert!(stmts[1].starts_with("CREATE TABLE bar"));
+    }
+
+    #[test]
+    fn test_split_preserves_trigger_block() {
+        let sql = "\
+CREATE TABLE events (id INTEGER);\n\
+CREATE TRIGGER my_trigger AFTER INSERT ON events BEGIN\n\
+    INSERT INTO log (msg) VALUES ('inserted');\n\
+END;\n\
+CREATE TABLE other (id INTEGER);";
+        let stmts = split_sql_statements(sql);
+        assert_eq!(stmts.len(), 3);
+        assert!(stmts[0].contains("CREATE TABLE events"));
+        assert!(stmts[1].contains("CREATE TRIGGER"));
+        assert!(stmts[1].contains("BEGIN"));
+        assert!(stmts[1].contains("END"));
+        assert!(stmts[2].contains("CREATE TABLE other"));
+    }
+
+    #[test]
+    fn test_split_empty_input() {
+        assert_eq!(split_sql_statements("").len(), 0);
+        assert_eq!(split_sql_statements("  \n  ").len(), 0);
+    }
+
+    #[test]
+    fn test_split_comments_only() {
+        let sql = "-- this is a comment\n-- another comment";
+        assert_eq!(split_sql_statements(sql).len(), 0);
+    }
+
+    #[test]
+    fn test_split_no_trailing_semicolon() {
+        let sql = "SELECT 1";
+        let stmts = split_sql_statements(sql);
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "SELECT 1");
+    }
+}

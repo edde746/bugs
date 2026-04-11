@@ -38,3 +38,56 @@ pub fn hour_bucket(iso: &str) -> String {
         iso.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_parse_rfc3339() {
+        let ts = json!("2026-04-11T14:23:07Z");
+        assert_eq!(parse_timestamp(&ts), Some("2026-04-11T14:23:07Z".to_string()));
+    }
+
+    #[test]
+    fn test_parse_rfc3339_with_offset() {
+        let ts = json!("2026-04-11T14:23:07+02:00");
+        assert_eq!(parse_timestamp(&ts), Some("2026-04-11T12:23:07Z".to_string()));
+    }
+
+    #[test]
+    fn test_parse_unix_timestamp_number() {
+        let ts = json!(1744380187);
+        let result = parse_timestamp(&ts);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("2025-"));
+    }
+
+    #[test]
+    fn test_parse_unix_timestamp_float() {
+        let ts = json!(1744380187.5);
+        assert!(parse_timestamp(&ts).is_some());
+    }
+
+    #[test]
+    fn test_parse_invalid() {
+        assert_eq!(parse_timestamp(&json!("not a date")), None);
+        assert_eq!(parse_timestamp(&json!(null)), None);
+        assert_eq!(parse_timestamp(&json!(true)), None);
+    }
+
+    #[test]
+    fn test_hour_bucket() {
+        assert_eq!(hour_bucket("2026-04-11T14:23:07Z"), "2026-04-11T14:00:00Z");
+        assert_eq!(hour_bucket("2026-04-11T00:59:59Z"), "2026-04-11T00:00:00Z");
+    }
+
+    #[test]
+    fn test_now_iso_format() {
+        let now = now_iso();
+        assert!(now.ends_with('Z'));
+        assert!(now.contains('T'));
+        assert_eq!(now.len(), 20); // "2026-04-11T14:23:07Z"
+    }
+}
