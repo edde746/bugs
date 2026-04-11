@@ -129,22 +129,82 @@ impl DbPool {
         ];
 
         for (i, sql) in migrations.iter().enumerate() {
-            // Execute each statement separately (SQLite doesn't support multi-statement in one query)
-            for statement in sql.split(';') {
+            for statement in split_sql_statements(sql) {
                 let trimmed = statement.trim();
-                if !trimmed.is_empty() {
-                    sqlx::query(trimmed)
-                        .execute(&self.writer)
-                        .await
-                        .map_err(|e| {
-                            tracing::error!(migration = i + 1, statement = %trimmed, "Migration failed: {e}");
-                            e
-                        })?;
+                if trimmed.is_empty() {
+                    continue;
                 }
+                sqlx::query(trimmed)
+                    .execute(&self.writer)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!(migration = i + 1, statement = %trimmed, "Migration failed: {e}");
+                        e
+                    })?;
             }
             info!(migration = i + 1, "Migration applied");
         }
 
         Ok(())
     }
+}
+
+/// Split SQL text into individual statements, respecting BEGIN...END blocks (triggers).
+/// Trigger statements like `CREATE TRIGGER ... BEGIN ... END;` are kept as one unit.
+fn split_sql_statements(sql: &str) -> Vec<String> {
+    let mut statements = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0; // nesting depth for BEGIN...END
+
+    for line in sql.lines() {
+        let trimmed = line.trim();
+
+        // Skip empty lines and comments when outside a statement
+        if trimmed.is_empty() || trimmed.starts_with("--") {
+            if !current.is_empty() {
+                current.push('\n');
+                current.push_str(line);
+            }
+            continue;
+        }
+
+        let upper = trimmed.to_uppercase();
+
+        // Track BEGIN/END nesting
+        if upper.contains("BEGIN") && !upper.contains("BEGIN TRANSACTION") {
+            // Check it's a keyword, not part of a string
+            let words: Vec<&str> = upper.split_whitespace().collect();
+            if words.last() == Some(&"BEGIN") || words.contains(&"BEGIN") {
+                depth += 1;
+            }
+        }
+
+        if !current.is_empty() {
+            current.push('\n');
+        }
+        current.push_str(line);
+
+        if upper.starts_with("END") || upper.starts_with("END;") {
+            if depth > 0 {
+                depth -= 1;
+            }
+        }
+
+        // Only split on `;` when not inside a BEGIN...END block
+        if depth == 0 && trimmed.ends_with(';') {
+            let stmt = current.trim().trim_end_matches(';').trim().to_string();
+            if !stmt.is_empty() {
+                statements.push(stmt);
+            }
+            current.clear();
+        }
+    }
+
+    // Remaining
+    let remaining = current.trim().trim_end_matches(';').trim().to_string();
+    if !remaining.is_empty() {
+        statements.push(remaining);
+    }
+
+    statements
 }
