@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS project_keys (
     created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
     rate_limit  INTEGER DEFAULT NULL
 );
-CREATE INDEX idx_project_keys_public ON project_keys(public_key) WHERE is_active = 1;
+CREATE INDEX IF NOT EXISTS idx_project_keys_public ON project_keys(public_key) WHERE is_active = 1;
 
 -- Releases are ORG-SCOPED
 CREATE TABLE IF NOT EXISTS releases (
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS artifact_debug_ids (
     kind        TEXT NOT NULL DEFAULT 'sourcemap',
     UNIQUE(debug_id, kind)
 );
-CREATE INDEX idx_artifact_debug_ids_lookup ON artifact_debug_ids(debug_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_debug_ids_lookup ON artifact_debug_ids(debug_id);
 
 CREATE TABLE IF NOT EXISTS issues (
     id              INTEGER PRIMARY KEY,
@@ -89,8 +89,8 @@ CREATE TABLE IF NOT EXISTS issues (
     metadata        TEXT,
     UNIQUE(project_id, fingerprint)
 );
-CREATE INDEX idx_issues_project_status ON issues(project_id, status, last_seen DESC);
-CREATE INDEX idx_issues_first_seen ON issues(project_id, first_seen DESC);
+CREATE INDEX IF NOT EXISTS idx_issues_project_status ON issues(project_id, status, last_seen DESC);
+CREATE INDEX IF NOT EXISTS idx_issues_first_seen ON issues(project_id, first_seen DESC);
 
 CREATE TABLE IF NOT EXISTS event_envelopes (
     id                    INTEGER PRIMARY KEY,
@@ -106,9 +106,9 @@ CREATE TABLE IF NOT EXISTS event_envelopes (
     processing_started_at TEXT,
     UNIQUE(project_id, event_id)
 );
-CREATE INDEX idx_envelopes_pending ON event_envelopes(state, next_attempt_at)
+CREATE INDEX IF NOT EXISTS idx_envelopes_pending ON event_envelopes(state, next_attempt_at)
     WHERE state IN ('pending', 'failed');
-CREATE INDEX idx_envelopes_processing ON event_envelopes(state, processing_started_at)
+CREATE INDEX IF NOT EXISTS idx_envelopes_processing ON event_envelopes(state, processing_started_at)
     WHERE state = 'processing';
 
 CREATE TABLE IF NOT EXISTS events (
@@ -131,9 +131,9 @@ CREATE TABLE IF NOT EXISTS events (
     data                  TEXT NOT NULL,
     UNIQUE(project_id, event_id)
 );
-CREATE INDEX idx_events_issue ON events(issue_id, timestamp DESC);
-CREATE INDEX idx_events_project_time ON events(project_id, received_at DESC);
-CREATE INDEX idx_events_trace ON events(trace_id) WHERE trace_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_events_issue ON events(issue_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_events_project_time ON events(project_id, received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_events_trace ON events(trace_id) WHERE trace_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS event_tags (
     id          INTEGER PRIMARY KEY,
@@ -142,8 +142,8 @@ CREATE TABLE IF NOT EXISTS event_tags (
     key         TEXT NOT NULL,
     value       TEXT NOT NULL
 );
-CREATE INDEX idx_event_tags_lookup ON event_tags(project_id, key, value);
-CREATE INDEX idx_event_tags_event ON event_tags(event_id);
+CREATE INDEX IF NOT EXISTS idx_event_tags_lookup ON event_tags(project_id, key, value);
+CREATE INDEX IF NOT EXISTS idx_event_tags_event ON event_tags(event_id);
 
 CREATE TABLE IF NOT EXISTS tag_keys (
     id          INTEGER PRIMARY KEY,
@@ -162,7 +162,7 @@ CREATE TABLE IF NOT EXISTS tag_values (
     last_seen   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
     UNIQUE(project_id, key, value)
 );
-CREATE INDEX idx_tag_values_freq ON tag_values(project_id, key, times_seen DESC);
+CREATE INDEX IF NOT EXISTS idx_tag_values_freq ON tag_values(project_id, key, times_seen DESC);
 
 CREATE TABLE IF NOT EXISTS issue_stats_hourly (
     id          INTEGER PRIMARY KEY,
@@ -172,7 +172,7 @@ CREATE TABLE IF NOT EXISTS issue_stats_hourly (
     count       INTEGER NOT NULL DEFAULT 0,
     UNIQUE(issue_id, bucket)
 );
-CREATE INDEX idx_issue_stats_bucket ON issue_stats_hourly(project_id, bucket DESC);
+CREATE INDEX IF NOT EXISTS idx_issue_stats_bucket ON issue_stats_hourly(project_id, bucket DESC);
 
 CREATE TABLE IF NOT EXISTS alert_rules (
     id          INTEGER PRIMARY KEY,

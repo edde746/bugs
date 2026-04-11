@@ -9,7 +9,7 @@ use crate::db::checkpoint::CheckpointManager;
 use crate::sentry_protocol::envelope::Envelope;
 use crate::sentry_protocol::types::SentryEvent;
 use crate::util::time::{now_iso, hour_bucket};
-use crate::worker::{fingerprint, indexer, normalizer};
+use crate::worker::{alerts, fingerprint, indexer, normalizer, symbolication};
 
 pub async fn process_envelope(
     db: &DbPool,
@@ -124,7 +124,10 @@ async fn process_inner(
         // 5. Normalize
         normalizer::normalize(&mut event);
 
-        // 6. (Skip symbolication for now)
+        // 6. Symbolicate using source maps
+        if let Err(e) = symbolication::symbolicate_event(&mut event, db, &config.artifacts_dir).await {
+            warn!(envelope_id, "Symbolication failed (non-fatal): {e}");
+        }
 
         // 7. Compute fingerprint
         let fp = fingerprint::compute_fingerprint(&event);
@@ -202,7 +205,7 @@ async fn process_inner(
         let received_at = now_iso();
 
         // 9. UPSERT into issues table
-        let issue: (i64,) = sqlx::query_as(
+        let issue: (i64, i64) = sqlx::query_as(
             "INSERT INTO issues (project_id, fingerprint, title, culprit, level, status, first_seen, last_seen, event_count) \
              VALUES (?, ?, ?, ?, ?, 'unresolved', ?, ?, 1) \
              ON CONFLICT(project_id, fingerprint) DO UPDATE SET \
@@ -211,7 +214,7 @@ async fn process_inner(
                 level = excluded.level, \
                 last_seen = excluded.last_seen, \
                 event_count = event_count + 1 \
-             RETURNING id",
+             RETURNING id, event_count",
         )
         .bind(project_id)
         .bind(&fp)
@@ -224,6 +227,7 @@ async fn process_inner(
         .await?;
 
         let issue_id = issue.0;
+        let is_new_issue = issue.1 == 1;
 
         // 10. INSERT into events table
         let event_row: (i64,) = sqlx::query_as(
@@ -278,6 +282,11 @@ async fn process_inner(
         .bind(&bucket)
         .execute(db.writer())
         .await?;
+
+        // 12. Evaluate alert rules
+        alerts::evaluate_alerts(db, project_id, issue_id, &event, is_new_issue)
+            .await
+            .ok();
 
         processed_any = true;
     }

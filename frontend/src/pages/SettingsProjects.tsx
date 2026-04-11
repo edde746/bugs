@@ -1,3 +1,4 @@
+import { A } from "@solidjs/router";
 import { createQuery, createMutation, useQueryClient } from "@tanstack/solid-query";
 import { createSignal, For, Show } from "solid-js";
 import { api } from "~/api/client";
@@ -122,7 +123,12 @@ export default function SettingsProjects() {
                   {(project) => (
                     <tr class="border-b border-[var(--color-border)]">
                       <td class="px-4 py-3 text-sm font-medium text-[var(--color-text-primary)]">
-                        {project.name}
+                        <A
+                          href={`/settings/projects/${project.id}`}
+                          class="hover:text-indigo-600 dark:hover:text-indigo-400"
+                        >
+                          {project.name}
+                        </A>
                       </td>
                       <td class="px-4 py-3 text-sm text-[var(--color-text-secondary)]">
                         {project.slug}

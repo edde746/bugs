@@ -8,6 +8,7 @@ const ProjectIssues = lazy(() => import("~/pages/ProjectIssues"));
 const IssueDetail = lazy(() => import("~/pages/IssueDetail"));
 const EventDetail = lazy(() => import("~/pages/EventDetail"));
 const SettingsProjects = lazy(() => import("~/pages/SettingsProjects"));
+const SettingsProjectDetail = lazy(() => import("~/pages/SettingsProjectDetail"));
 const NotFound = lazy(() => import("~/pages/NotFound"));
 
 export const routes: RouteDefinition[] = [
@@ -26,6 +27,10 @@ export const routes: RouteDefinition[] = [
       {
         path: "/",
         component: SettingsProjects,
+      },
+      {
+        path: "/:projectId",
+        component: SettingsProjectDetail,
       },
     ],
   },

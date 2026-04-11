@@ -7,7 +7,7 @@ pub mod alerts;
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::config::Config;
 use crate::db::DbPool;
@@ -19,35 +19,34 @@ pub fn spawn(
     db: DbPool,
     config: Arc<Config>,
     checkpoint: Arc<CheckpointManager>,
-    mut rx: mpsc::Receiver<WorkerMessage>,
+    rx: mpsc::Receiver<WorkerMessage>,
 ) {
     let num_workers = config.worker_threads;
-    let (dispatch_tx, _) = tokio::sync::broadcast::channel::<WorkerMessage>(10_000);
 
-    // Spawn channel receiver -> broadcast dispatcher
-    let dtx = dispatch_tx.clone();
-    tokio::spawn(async move {
-        while let Some(envelope_id) = rx.recv().await {
-            if dtx.send(envelope_id).is_err() {
-                warn!("No active workers to receive message");
-            }
-        }
-    });
+    // Wrap the single receiver in Arc<Mutex> so workers compete for messages
+    let shared_rx = Arc::new(tokio::sync::Mutex::new(rx));
 
-    // Spawn worker tasks
+    // Spawn worker tasks - each competes for the next message
     for worker_id in 0..num_workers {
         let db = db.clone();
         let config = config.clone();
         let checkpoint = checkpoint.clone();
-        let mut sub = dispatch_tx.subscribe();
+        let rx = shared_rx.clone();
 
         tokio::spawn(async move {
             info!(worker_id, "Worker started");
             loop {
-                tokio::select! {
-                    Ok(envelope_id) = sub.recv() => {
-                        processor::process_envelope(&db, &config, &checkpoint, envelope_id).await;
+                // Only one worker receives each message
+                let envelope_id = {
+                    let mut rx = rx.lock().await;
+                    rx.recv().await
+                };
+
+                match envelope_id {
+                    Some(id) => {
+                        processor::process_envelope(&db, &config, &checkpoint, id).await;
                     }
+                    None => break, // channel closed
                 }
             }
         });
@@ -67,7 +66,6 @@ pub fn spawn(
 }
 
 async fn poll_envelopes(db: &DbPool, config: &Config, checkpoint: &CheckpointManager) {
-    // Claim pending and failed envelopes
     let envelopes: Vec<(i64,)> = sqlx::query_as(
         "SELECT id FROM event_envelopes \
          WHERE (state = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%SZ','now'))) \

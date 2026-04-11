@@ -8,6 +8,7 @@ mod sentry_protocol;
 mod util;
 
 use std::sync::Arc;
+use clap::Parser;
 use tokio::sync::mpsc;
 use tracing::info;
 
@@ -22,8 +23,20 @@ pub struct AppState {
     pub worker_tx: mpsc::Sender<worker::WorkerMessage>,
 }
 
+#[derive(clap::Parser)]
+#[command(name = "bugs", about = "Sentry-compatible error tracker")]
+struct Cli {
+    /// Allow running without an admin token on non-loopback addresses.
+    /// WARNING: This exposes management APIs without authentication.
+    #[arg(long)]
+    insecure_open_admin: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Parse CLI args
+    let cli = Cli::parse();
+
     // Init tracing
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -38,6 +51,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Config::default()
     });
     let config = Arc::new(config);
+
+    // Safety check: if no admin token and not loopback, require --insecure-open-admin
+    if config.auth.admin_token.is_empty() && !is_loopback_address(&config.bind_address) {
+        if !cli.insecure_open_admin {
+            eprintln!(
+                "ERROR: No admin_token configured and bind address '{}' is not loopback.\n\
+                 This would expose management APIs without authentication.\n\
+                 Either:\n  \
+                 - Set auth.admin_token in bugs.toml or BUGS_AUTH_ADMIN_TOKEN env var\n  \
+                 - Bind to 127.0.0.1 (loopback)\n  \
+                 - Pass --insecure-open-admin to override this check",
+                config.bind_address
+            );
+            std::process::exit(1);
+        }
+    }
 
     info!(bind = %config.bind_address, db = %config.database_path, "Starting Bugs");
 
@@ -72,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Build router
-    let app = api::router()
+    let app = api::router(&state)
         .route("/health", axum::routing::get(|| async { "ok" }))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .layer(tower_http::compression::CompressionLayer::new())
@@ -88,6 +117,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     Ok(())
+}
+
+/// Check if the bind address is a loopback address (127.x.x.x or [::1])
+fn is_loopback_address(addr: &str) -> bool {
+    // Extract host part (before the port)
+    let host = if let Some(bracket_end) = addr.find(']') {
+        // IPv6: [::1]:port
+        &addr[1..bracket_end]
+    } else if let Some(colon_pos) = addr.rfind(':') {
+        &addr[..colon_pos]
+    } else {
+        addr
+    };
+
+    host == "127.0.0.1" || host == "localhost" || host == "::1"
 }
 
 async fn shutdown_signal() {
