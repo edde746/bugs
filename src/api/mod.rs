@@ -8,6 +8,9 @@ pub mod events;
 pub mod alerts;
 pub mod stats;
 pub mod search;
+pub mod comments;
+pub mod user_reports;
+pub mod performance;
 pub mod frontend;
 
 use axum::{Router, extract::State, http::{StatusCode, header}, middleware, response::Response};
@@ -23,6 +26,9 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .merge(alerts::routes())
         .merge(stats::routes())
         .merge(search::routes())
+        .merge(comments::routes())
+        .merge(user_reports::routes())
+        .merge(performance::routes())
         .route_layer(middleware::from_fn_with_state(state.clone(), admin_auth_check));
 
     Router::new()

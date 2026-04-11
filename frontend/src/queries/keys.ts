@@ -14,6 +14,12 @@ export const queryKeys = {
     detail: (id: string) => ["events", "detail", id] as const,
     latest: (issueId: string) => ["events", issueId, "latest"] as const,
   },
+  comments: {
+    list: (issueId: string) => ["comments", issueId] as const,
+  },
+  activity: {
+    list: (issueId: string) => ["activity", issueId] as const,
+  },
   stats: {
     project: (slug: string) => ["stats", slug] as const,
     issue: (id: string) => ["stats", "issue", id] as const,

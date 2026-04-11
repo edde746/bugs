@@ -8,6 +8,7 @@ use tracing::warn;
 
 use crate::AppState;
 use crate::models::release::*;
+use crate::models::deploy::*;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -15,6 +16,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/0/organizations/{org}/releases", get(list_releases).post(create_release))
         .route("/api/0/organizations/{org}/releases/{version}", get(get_release))
         .route("/api/0/projects/{org}/{project}/releases/{version}/files/", post(upload_release_file).get(list_release_files))
+        .route("/api/0/organizations/{org}/releases/{version}/deploys/", get(list_deploys).post(create_deploy))
 }
 
 #[derive(Deserialize)]
@@ -152,7 +154,7 @@ async fn create_release(
     .await
     .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-    // Associate with projects if specified
+    // Associate with projects and auto-resolve "next release" issues
     if let Some(projects) = &input.projects {
         for slug in projects {
             let project: Option<(i64,)> = sqlx::query_as(
@@ -163,15 +165,36 @@ async fn create_release(
             .await
             .unwrap_or(None);
 
-            if let Some((pid,)) = project {
-                sqlx::query(
-                    "INSERT OR IGNORE INTO release_projects (release_id, project_id) VALUES (?, ?)"
-                )
-                .bind(release.id)
-                .bind(pid)
-                .execute(state.db.writer())
-                .await
-                .ok();
+            let Some((pid,)) = project else { continue };
+
+            sqlx::query(
+                "INSERT OR IGNORE INTO release_projects (release_id, project_id) VALUES (?, ?)"
+            )
+            .bind(release.id)
+            .bind(pid)
+            .execute(state.db.writer())
+            .await
+            .ok();
+
+            // Auto-resolve issues marked "resolve in next release"
+            let result = sqlx::query(
+                "UPDATE issues SET status = 'resolved', resolved_in_release = ? \
+                 WHERE project_id = ? AND status = 'resolved' AND resolved_in_release = '__next__'"
+            )
+            .bind(&input.version)
+            .bind(pid)
+            .execute(state.db.writer())
+            .await;
+
+            if let Ok(r) = result {
+                if r.rows_affected() > 0 {
+                    tracing::info!(
+                        project = slug,
+                        version = input.version,
+                        count = r.rows_affected(),
+                        "Auto-resolved issues for new release"
+                    );
+                }
             }
         }
     }
@@ -341,4 +364,62 @@ async fn list_release_files(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(files))
+}
+
+async fn list_deploys(
+    State(state): State<AppState>,
+    Path((_org, version)): Path<(String, String)>,
+) -> Result<Json<Vec<Deploy>>, StatusCode> {
+    let release: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM releases WHERE org_id = 1 AND version = ?",
+    )
+    .bind(&version)
+    .fetch_optional(state.db.reader())
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let release_id = release.ok_or(StatusCode::NOT_FOUND)?.0;
+
+    let deploys: Vec<Deploy> = sqlx::query_as(
+        "SELECT * FROM deploys WHERE release_id = ? ORDER BY date_finished DESC",
+    )
+    .bind(release_id)
+    .fetch_all(state.db.reader())
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(deploys))
+}
+
+async fn create_deploy(
+    State(state): State<AppState>,
+    Path((_org, version)): Path<(String, String)>,
+    Json(input): Json<CreateDeploy>,
+) -> Result<(StatusCode, Json<Deploy>), (StatusCode, String)> {
+    let release: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM releases WHERE org_id = 1 AND version = ?",
+    )
+    .bind(&version)
+    .fetch_optional(state.db.reader())
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let release_id = release.ok_or((StatusCode::NOT_FOUND, "Release not found".to_string()))?.0;
+
+    let deploy: Deploy = sqlx::query_as(
+        "INSERT INTO deploys (release_id, environment, name, url, date_started, date_finished) \
+         VALUES (?, ?, ?, ?, ?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))) \
+         RETURNING *",
+    )
+    .bind(release_id)
+    .bind(&input.environment)
+    .bind(input.name.as_deref().unwrap_or(""))
+    .bind(input.url.as_deref().unwrap_or(""))
+    .bind(&input.date_started)
+    .bind(&input.date_finished)
+    .fetch_one(state.db.writer())
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok((StatusCode::CREATED, Json(deploy)))
 }

@@ -15,13 +15,26 @@ const CONDITION_TYPES = [
   { value: "RegressionEvent", label: "Issue Regression" },
 ] as const;
 
+const ACTION_TYPES = [
+  { value: "Webhook", label: "Webhook", urlField: "url" },
+  { value: "Slack", label: "Slack", urlField: "webhook_url" },
+  { value: "Discord", label: "Discord", urlField: "webhook_url" },
+  { value: "Email", label: "Email", urlField: "to" },
+  { value: "LogFile", label: "Log File", urlField: "path" },
+] as const;
+
 function conditionLabel(type: string): string {
   return CONDITION_TYPES.find((ct) => ct.value === type)?.label ?? type;
 }
 
-function firstWebhookUrl(rule: AlertRuleResponse): string {
-  const webhook = rule.actions.find((a) => a.type === "Webhook");
-  return webhook?.url ?? "";
+function actionLabel(type: string): string {
+  return ACTION_TYPES.find((at) => at.value === type)?.label ?? type;
+}
+
+function firstActionUrl(rule: AlertRuleResponse): string {
+  const action = rule.actions[0];
+  if (!action) return "";
+  return action.url ?? action.webhook_url ?? action.to ?? action.path ?? "";
 }
 
 export default function ProjectAlerts() {
@@ -30,8 +43,23 @@ export default function ProjectAlerts() {
 
   const [name, setName] = createSignal("");
   const [conditionType, setConditionType] = createSignal("NewIssue");
+  const [actionType, setActionType] = createSignal("Webhook");
   const [webhookUrl, setWebhookUrl] = createSignal("");
   const [showModal, setShowModal] = createSignal(false);
+
+  const urlFieldLabel = () => {
+    const at = ACTION_TYPES.find((a) => a.value === actionType());
+    if (at?.urlField === "path") return "File Path";
+    if (at?.urlField === "to") return "Email Address";
+    return `${at?.label ?? "Webhook"} URL`;
+  };
+
+  const buildAction = () => {
+    const type = actionType();
+    const at = ACTION_TYPES.find((a) => a.value === type);
+    const field = at?.urlField ?? "url";
+    return { type, [field]: webhookUrl() };
+  };
 
   const alertsQuery = createQuery(() => ({
     queryKey: ["alerts", params.project],
@@ -43,7 +71,7 @@ export default function ProjectAlerts() {
     mutationFn: (input: {
       name: string;
       conditions: { type: string; threshold?: number; window_seconds?: number }[];
-      actions: { type: string; url?: string }[];
+      actions: Record<string, string>[];
     }) => api.post<AlertRuleResponse>(`/internal/projects/${params.project}/alerts`, input),
     onSuccess: () => {
       queryClient.invalidateQueries({
@@ -51,24 +79,11 @@ export default function ProjectAlerts() {
       });
       setName("");
       setConditionType("NewIssue");
+      setActionType("Webhook");
       setWebhookUrl("");
       setShowModal(false);
     },
   }));
-
-  const handleSubmit = (e: SubmitEvent) => {
-    e.preventDefault();
-    const ct = conditionType();
-    const condition: { type: string; threshold?: number; window_seconds?: number } =
-      ct === "FrequencyThreshold"
-        ? { type: ct, threshold: 1, window_seconds: 3600 }
-        : { type: ct };
-    createMut.mutate({
-      name: name(),
-      conditions: [condition],
-      actions: [{ type: "Webhook", url: webhookUrl() }],
-    });
-  };
 
   return (
     <div class="page">
@@ -107,7 +122,7 @@ export default function ProjectAlerts() {
                 createMut.mutate({
                   name: name(),
                   conditions: [condition],
-                  actions: [{ type: "Webhook", url: webhookUrl() }],
+                  actions: [buildAction()],
                 });
               }}
             >
@@ -140,13 +155,29 @@ export default function ProjectAlerts() {
             </select>
           </div>
           <div class="form-field">
-            <label class="field-label">Webhook URL</label>
+            <label class="field-label">Action Type</label>
+            <select
+              value={actionType()}
+              onChange={(e) => setActionType(e.currentTarget.value)}
+              class="input"
+            >
+              <For each={ACTION_TYPES}>
+                {(at) => <option value={at.value}>{at.label}</option>}
+              </For>
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="field-label">{urlFieldLabel()}</label>
             <input
-              type="url"
+              type={actionType() === "Email" ? "email" : actionType() === "LogFile" ? "text" : "url"}
               value={webhookUrl()}
               onInput={(e) => setWebhookUrl(e.currentTarget.value)}
               class="input"
-              placeholder="https://hooks.example.com/webhook"
+              placeholder={
+                actionType() === "LogFile" ? "/var/log/bugs-alerts.log"
+                : actionType() === "Email" ? "alerts@example.com"
+                : "https://hooks.example.com/webhook"
+              }
             />
           </div>
         </div>
@@ -168,7 +199,8 @@ export default function ProjectAlerts() {
                 <tr>
                   <th>Name</th>
                   <th>Condition</th>
-                  <th>Webhook URL</th>
+                  <th>Action</th>
+                  <th>Target</th>
                   <th data-align="right">Created</th>
                 </tr>
               </thead>
@@ -180,8 +212,11 @@ export default function ProjectAlerts() {
                       <td class="text-secondary">
                         {rule.conditions.length > 0 ? conditionLabel(rule.conditions[0].type) : "\u2014"}
                       </td>
+                      <td class="text-secondary">
+                        {rule.actions.length > 0 ? actionLabel(rule.actions[0].type) : "\u2014"}
+                      </td>
                       <td class="text-secondary text-mono" style={{ "font-size": "12px" }}>
-                        {firstWebhookUrl(rule)}
+                        {firstActionUrl(rule)}
                       </td>
                       <td data-align="right" class="text-secondary">
                         {relativeTime(rule.created_at)}

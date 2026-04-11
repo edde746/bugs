@@ -3,3 +3,8 @@ pub mod event;
 pub mod issue;
 pub mod release;
 pub mod alert;
+pub mod comment;
+pub mod activity;
+pub mod user_report;
+pub mod deploy;
+pub mod transaction;

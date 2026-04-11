@@ -134,12 +134,66 @@ async fn update_issue(
     Json(input): Json<UpdateIssue>,
 ) -> Result<Json<Issue>, StatusCode> {
     if let Some(status) = &input.status {
-        sqlx::query("UPDATE issues SET status = ? WHERE id = ?")
-            .bind(status)
-            .bind(id)
-            .execute(state.db.writer())
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        match status.as_str() {
+            "ignored" => {
+                sqlx::query(
+                    "UPDATE issues SET status = 'ignored', snooze_until = ?, snooze_event_count = ?, \
+                     resolved_in_release = NULL WHERE id = ?",
+                )
+                .bind(&input.snooze_until)
+                .bind(&input.snooze_event_count)
+                .bind(id)
+                .execute(state.db.writer())
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+                sqlx::query("INSERT INTO issue_activity (issue_id, kind) VALUES (?, 'ignored')")
+                    .bind(id)
+                    .execute(state.db.writer())
+                    .await
+                    .ok();
+            }
+            "resolved" => {
+                sqlx::query(
+                    "UPDATE issues SET status = 'resolved', snooze_until = NULL, snooze_event_count = NULL, \
+                     resolved_in_release = ? WHERE id = ?",
+                )
+                .bind(&input.resolved_in_release)
+                .bind(id)
+                .execute(state.db.writer())
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+                let data = input.resolved_in_release.as_ref().map(|r| {
+                    serde_json::json!({ "release": r }).to_string()
+                });
+                sqlx::query("INSERT INTO issue_activity (issue_id, kind, data) VALUES (?, 'resolved', ?)")
+                    .bind(id)
+                    .bind(&data)
+                    .execute(state.db.writer())
+                    .await
+                    .ok();
+            }
+            "unresolved" => {
+                sqlx::query(
+                    "UPDATE issues SET status = 'unresolved', snooze_until = NULL, snooze_event_count = NULL, \
+                     resolved_in_release = NULL WHERE id = ?",
+                )
+                .bind(id)
+                .execute(state.db.writer())
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+                sqlx::query("INSERT INTO issue_activity (issue_id, kind) VALUES (?, 'unresolved')")
+                    .bind(id)
+                    .execute(state.db.writer())
+                    .await
+                    .ok();
+            }
+            _ => {
+                return Err(StatusCode::BAD_REQUEST);
+            }
+        }
     }
 
     get_issue(State(state), Path(id)).await

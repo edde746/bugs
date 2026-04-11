@@ -226,7 +226,19 @@ async fn process_inner(
 
         let received_at = now_iso();
 
-        // 9. UPSERT into issues table
+        // 9. Check for regression and snooze state before upsert
+        let existing: Option<(String, Option<i64>)> = sqlx::query_as(
+            "SELECT status, snooze_event_count FROM issues WHERE project_id = ? AND fingerprint = ?",
+        )
+        .bind(project_id)
+        .bind(&fp)
+        .fetch_optional(db.writer())
+        .await?;
+
+        let old_status = existing.as_ref().map(|(s, _)| s.as_str());
+
+        // UPSERT into issues table — auto-reopen resolved issues on new events,
+        // and auto-unmute ignored issues when snooze_event_count threshold is reached
         let issue: (i64, i64) = sqlx::query_as(
             "INSERT INTO issues (project_id, fingerprint, title, culprit, level, status, first_seen, last_seen, event_count) \
              VALUES (?, ?, ?, ?, ?, 'unresolved', ?, ?, 1) \
@@ -235,7 +247,29 @@ async fn process_inner(
                 culprit = excluded.culprit, \
                 level = excluded.level, \
                 last_seen = excluded.last_seen, \
-                event_count = event_count + 1 \
+                event_count = event_count + 1, \
+                status = CASE \
+                    WHEN issues.status = 'resolved' THEN 'unresolved' \
+                    WHEN issues.status = 'ignored' AND issues.snooze_event_count IS NOT NULL \
+                         AND (event_count + 1) >= issues.snooze_event_count THEN 'unresolved' \
+                    ELSE issues.status \
+                END, \
+                snooze_until = CASE \
+                    WHEN issues.status = 'resolved' THEN NULL \
+                    WHEN issues.status = 'ignored' AND issues.snooze_event_count IS NOT NULL \
+                         AND (event_count + 1) >= issues.snooze_event_count THEN NULL \
+                    ELSE issues.snooze_until \
+                END, \
+                snooze_event_count = CASE \
+                    WHEN issues.status = 'resolved' THEN NULL \
+                    WHEN issues.status = 'ignored' AND issues.snooze_event_count IS NOT NULL \
+                         AND (event_count + 1) >= issues.snooze_event_count THEN NULL \
+                    ELSE issues.snooze_event_count \
+                END, \
+                resolved_in_release = CASE \
+                    WHEN issues.status = 'resolved' THEN NULL \
+                    ELSE issues.resolved_in_release \
+                END \
              RETURNING id, event_count",
         )
         .bind(project_id)
@@ -250,6 +284,22 @@ async fn process_inner(
 
         let issue_id = issue.0;
         let is_new_issue = issue.1 == 1;
+        let is_regression = !is_new_issue && old_status == Some("resolved");
+
+        // Record activity for new issues and regressions
+        if is_new_issue {
+            sqlx::query("INSERT INTO issue_activity (issue_id, kind) VALUES (?, 'first_seen')")
+                .bind(issue_id)
+                .execute(db.writer())
+                .await
+                .ok();
+        } else if is_regression {
+            sqlx::query("INSERT INTO issue_activity (issue_id, kind) VALUES (?, 'regression')")
+                .bind(issue_id)
+                .execute(db.writer())
+                .await
+                .ok();
+        }
 
         // 10. INSERT into events table
         let event_row: (i64,) = sqlx::query_as(
@@ -306,15 +356,162 @@ async fn process_inner(
         .await?;
 
         // 12. Evaluate alert rules
-        alerts::evaluate_alerts(db, project_id, issue_id, &event, is_new_issue)
+        alerts::evaluate_alerts(db, config, project_id, issue_id, &event, is_new_issue, is_regression)
             .await
             .ok();
 
         processed_any = true;
     }
 
+    // Process transaction items (performance monitoring)
+    for item in &envelope.items {
+        if item.headers.item_type != "transaction" {
+            continue;
+        }
+
+        if let Ok(txn) = serde_json::from_slice::<serde_json::Value>(&item.payload) {
+            let transaction_name = txn
+                .get("transaction")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+
+            let op = txn
+                .get("contexts")
+                .and_then(|c| c.get("trace"))
+                .and_then(|t| t.get("op"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let status = txn
+                .get("contexts")
+                .and_then(|c| c.get("trace"))
+                .and_then(|t| t.get("status"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("ok")
+                .to_string();
+
+            let method = txn
+                .get("request")
+                .and_then(|r| r.get("method"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            // Calculate duration from start_timestamp and timestamp (both in seconds as f64)
+            let start_ts = txn.get("start_timestamp").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let end_ts = txn.get("timestamp").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let duration_ms = (end_ts - start_ts) * 1000.0;
+
+            let timestamp_str = txn
+                .get("timestamp")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let trace_id = txn
+                .get("contexts")
+                .and_then(|c| c.get("trace"))
+                .and_then(|t| t.get("trace_id"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
+            let environment = txn.get("environment").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let release = txn.get("release").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+            let is_error = status != "ok" && status != "cancelled";
+
+            let data = serde_json::to_string(&txn).unwrap_or_default();
+
+            // Upsert transaction group
+            let group: (i64,) = sqlx::query_as(
+                "INSERT INTO transaction_groups (project_id, transaction_name, op, method, count, error_count, sum_duration_ms, min_duration_ms, max_duration_ms, last_seen) \
+                 VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?) \
+                 ON CONFLICT(project_id, transaction_name, op, method) DO UPDATE SET \
+                    count = count + 1, \
+                    error_count = error_count + excluded.error_count, \
+                    sum_duration_ms = sum_duration_ms + excluded.sum_duration_ms, \
+                    min_duration_ms = MIN(COALESCE(transaction_groups.min_duration_ms, excluded.min_duration_ms), excluded.min_duration_ms), \
+                    max_duration_ms = MAX(COALESCE(transaction_groups.max_duration_ms, excluded.max_duration_ms), excluded.max_duration_ms), \
+                    last_seen = excluded.last_seen \
+                 RETURNING id",
+            )
+            .bind(project_id)
+            .bind(&transaction_name)
+            .bind(&op)
+            .bind(&method)
+            .bind(if is_error { 1i64 } else { 0 })
+            .bind(duration_ms)
+            .bind(duration_ms)
+            .bind(duration_ms)
+            .bind(&timestamp_str)
+            .fetch_one(db.writer())
+            .await?;
+
+            // Insert individual transaction record
+            sqlx::query(
+                "INSERT INTO transactions (project_id, group_id, trace_id, transaction_name, op, method, status, duration_ms, timestamp, environment, release, data) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(project_id)
+            .bind(group.0)
+            .bind(&trace_id)
+            .bind(&transaction_name)
+            .bind(&op)
+            .bind(&method)
+            .bind(&status)
+            .bind(duration_ms)
+            .bind(&timestamp_str)
+            .bind(&environment)
+            .bind(&release)
+            .bind(&data)
+            .execute(db.writer())
+            .await?;
+
+            processed_any = true;
+        }
+    }
+
+    // Process user_report items
+    for item in &envelope.items {
+        if item.headers.item_type != "user_report" {
+            continue;
+        }
+
+        #[derive(serde::Deserialize)]
+        struct UserReportPayload {
+            event_id: Option<String>,
+            name: Option<String>,
+            email: Option<String>,
+            comments: Option<String>,
+        }
+
+        if let Ok(report) = serde_json::from_slice::<UserReportPayload>(&item.payload) {
+            let report_event_id = report
+                .event_id
+                .or_else(|| envelope.headers.event_id.clone())
+                .unwrap_or_default();
+
+            sqlx::query(
+                "INSERT INTO user_reports (project_id, event_id, name, email, comments) \
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(project_id)
+            .bind(&report_event_id)
+            .bind(report.name.as_deref().unwrap_or(""))
+            .bind(report.email.as_deref().unwrap_or(""))
+            .bind(report.comments.as_deref().unwrap_or(""))
+            .execute(db.writer())
+            .await
+            .ok();
+
+            processed_any = true;
+        }
+    }
+
     if !processed_any {
-        debug!(envelope_id, "Envelope contained no event items, skipping");
+        debug!(envelope_id, "Envelope contained no processable items, skipping");
     }
 
     Ok(())

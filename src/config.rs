@@ -23,6 +23,8 @@ pub struct Config {
     pub public_url: Option<String>,
     #[serde(default)]
     pub ingest: IngestConfig,
+    #[serde(default)]
+    pub email: EmailConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -86,6 +88,28 @@ impl Default for IngestConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct EmailConfig {
+    /// SMTP host (e.g., "smtp.gmail.com"). Empty = email disabled.
+    #[serde(default)]
+    pub smtp_host: String,
+    #[serde(default = "default_smtp_port")]
+    pub smtp_port: u16,
+    #[serde(default)]
+    pub smtp_username: String,
+    #[serde(default)]
+    pub smtp_password: String,
+    /// From address for alert emails
+    #[serde(default)]
+    pub from_address: String,
+    /// Use STARTTLS (default true)
+    #[serde(default = "default_true")]
+    pub smtp_tls: bool,
+}
+
+fn default_smtp_port() -> u16 { 587 }
+fn default_true() -> bool { true }
+
 fn default_bind_address() -> String { "0.0.0.0:9000".to_string() }
 fn default_database_path() -> String { "./data/bugs.db".to_string() }
 fn default_artifacts_dir() -> String { "./data/artifacts".to_string() }
@@ -127,6 +151,7 @@ impl Default for Config {
             auth: AuthConfig::default(),
             sqlite: SqliteConfig::default(),
             ingest: IngestConfig::default(),
+            email: EmailConfig::default(),
         }
     }
 }

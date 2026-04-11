@@ -26,6 +26,9 @@ pub enum AlertCondition {
 #[serde(tag = "type")]
 pub enum AlertAction {
     Webhook { url: String },
+    Slack { webhook_url: String },
+    Discord { webhook_url: String },
+    Email { to: String },
     LogFile { path: String },
 }
 

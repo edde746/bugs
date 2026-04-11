@@ -1,9 +1,9 @@
 import { A, useParams } from "@solidjs/router";
 import { createQuery, createMutation, useQueryClient } from "@tanstack/solid-query";
-import { createSignal, Show } from "solid-js";
+import { createSignal, Show, For } from "solid-js";
 import { api } from "~/api/client";
 import { queryKeys } from "~/queries/keys";
-import type { Issue, UpdateIssueInput, EventListResponse } from "~/lib/sentry-types";
+import type { Issue, UpdateIssueInput, EventListResponse, IssueComment, IssueActivity } from "~/lib/sentry-types";
 import { relativeTime, formatNumber } from "~/lib/formatters";
 import { STATUS_LABELS } from "~/lib/constants";
 import Badge from "~/components/ui/Badge";
@@ -18,6 +18,19 @@ import IconArrowLeft from "~icons/lucide/arrow-left";
 import IconArrowRight from "~icons/lucide/arrow-right";
 import type { ExceptionValue } from "~/components/events/ExceptionDisplay";
 import type { Breadcrumb } from "~/components/events/BreadcrumbsTimeline";
+
+const ACTIVITY_LABELS: Record<string, string> = {
+  first_seen: "Issue first seen",
+  resolved: "Marked as resolved",
+  unresolved: "Marked as unresolved",
+  ignored: "Ignored",
+  unignored: "Unignored",
+  regression: "Regression detected",
+};
+
+function activityKindLabel(kind: string): string {
+  return ACTIVITY_LABELS[kind] ?? kind;
+}
 
 export default function IssueDetail() {
   const params = useParams<{ project: string; issueId: string }>();
@@ -111,6 +124,42 @@ export default function IssueDetail() {
   const handleStatusChange = (status: string) => {
     updateMutation.mutate({ status });
   };
+
+  // Comments
+  const [commentText, setCommentText] = createSignal("");
+
+  const commentsQuery = createQuery(() => ({
+    queryKey: queryKeys.comments.list(params.issueId),
+    queryFn: () => api.get<IssueComment[]>(`/internal/issues/${params.issueId}/comments`),
+    enabled: !!issueQuery.data,
+  }));
+
+  const addCommentMutation = createMutation(() => ({
+    mutationFn: (text: string) =>
+      api.post<IssueComment>(`/internal/issues/${params.issueId}/comments`, { text }),
+    onSuccess: () => {
+      setCommentText("");
+      queryClient.invalidateQueries({ queryKey: queryKeys.comments.list(params.issueId) });
+    },
+  }));
+
+  const deleteCommentMutation = createMutation(() => ({
+    mutationFn: (id: number) => api.delete(`/internal/comments/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.comments.list(params.issueId) });
+    },
+  }));
+
+  const handleAddComment = () => {
+    const text = commentText().trim();
+    if (text) addCommentMutation.mutate(text);
+  };
+
+  const activityQuery = createQuery(() => ({
+    queryKey: queryKeys.activity.list(params.issueId),
+    queryFn: () => api.get<IssueActivity[]>(`/internal/issues/${params.issueId}/activity`),
+    enabled: !!issueQuery.data,
+  }));
 
   const canGoNewer = () => eventIndex() > 0;
   const canGoOlder = () => {
@@ -449,6 +498,73 @@ export default function IssueDetail() {
                 )}
               </Show>
             </Show>
+
+            {/* Activity timeline */}
+            <Show when={activityQuery.data && activityQuery.data.length > 0}>
+              <div class="card" style={{ "margin-top": "24px" }}>
+                <h3 style={{ "margin-bottom": "12px" }}>Activity</h3>
+                <div class="activity-timeline">
+                  <For each={activityQuery.data}>
+                    {(item) => (
+                      <div class="activity-item">
+                        <span class="activity-item__dot" data-kind={item.kind} />
+                        <span class="activity-item__label">{activityKindLabel(item.kind)}</span>
+                        <span class="activity-item__time text-secondary text-sm">{relativeTime(item.created_at)}</span>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </div>
+            </Show>
+
+            {/* Comments section */}
+            <div class="card" style={{ "margin-top": "24px" }}>
+              <h3 style={{ "margin-bottom": "12px" }}>Comments</h3>
+
+              <Show when={commentsQuery.data && commentsQuery.data.length > 0}>
+                <div class="section-gap" style={{ "margin-bottom": "16px" }}>
+                  <For each={commentsQuery.data}>
+                    {(comment) => (
+                      <div class="comment">
+                        <div class="comment__text">{comment.text}</div>
+                        <div class="comment__meta">
+                          <span class="text-secondary text-sm">{relativeTime(comment.created_at)}</span>
+                          <button
+                            class="comment__delete"
+                            onClick={() => deleteCommentMutation.mutate(comment.id)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
+
+              <div style={{ display: "flex", gap: "8px" }}>
+                <textarea
+                  class="comment__input"
+                  placeholder="Add a comment..."
+                  value={commentText()}
+                  onInput={(e) => setCommentText(e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                      handleAddComment();
+                    }
+                  }}
+                  rows={2}
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleAddComment}
+                  disabled={addCommentMutation.isPending || !commentText().trim()}
+                >
+                  Post
+                </Button>
+              </div>
+            </div>
           </>
         )}
       </Show>

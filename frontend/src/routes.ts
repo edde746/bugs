@@ -11,6 +11,7 @@ const EventDetail = lazy(() => import("~/pages/EventDetail"));
 const DirectEventDetail = lazy(() => import("~/pages/DirectEventDetail"));
 const ProjectReleases = lazy(() => import("~/pages/ProjectReleases"));
 const ProjectAlerts = lazy(() => import("~/pages/ProjectAlerts"));
+const ProjectPerformance = lazy(() => import("~/pages/ProjectPerformance"));
 const SettingsProjects = lazy(() => import("~/pages/SettingsProjects"));
 const SettingsProjectDetail = lazy(() => import("~/pages/SettingsProjectDetail"));
 const NotFound = lazy(() => import("~/pages/NotFound"));
@@ -75,6 +76,10 @@ export const routes: RouteDefinition[] = [
       {
         path: "/alerts",
         component: ProjectAlerts,
+      },
+      {
+        path: "/performance",
+        component: ProjectPerformance,
       },
     ],
   },

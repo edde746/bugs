@@ -39,6 +39,7 @@ rust-embed = "8"
 mime_guess = "2"
 url = "2"
 reqwest = { version = "0.13", features = ["json", "rustls"], default-features = false }
+lettre = { version = "0.11", features = ["tokio1-rustls-tls", "smtp-transport", "builder"], default-features = false }
 bytes = "1"
 base64 = "0.22"
 thiserror = "2"

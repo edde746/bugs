@@ -126,6 +126,13 @@ impl DbPool {
             include_str!("../../migrations/001_initial_schema.sql"),
             include_str!("../../migrations/002_fts5_indexes.sql"),
             include_str!("../../migrations/003_expression_indexes.sql"),
+            include_str!("../../migrations/004_issue_muting.sql"),
+            include_str!("../../migrations/005_issue_comments.sql"),
+            include_str!("../../migrations/006_resolve_by_release.sql"),
+            include_str!("../../migrations/007_issue_activity.sql"),
+            include_str!("../../migrations/008_user_feedback.sql"),
+            include_str!("../../migrations/009_deploys.sql"),
+            include_str!("../../migrations/010_performance.sql"),
         ];
 
         for (i, sql) in migrations.iter().enumerate() {

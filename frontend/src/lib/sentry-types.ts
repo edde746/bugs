@@ -77,6 +77,8 @@ export interface AlertCondition {
 export interface AlertAction {
   type: string;
   url?: string;
+  webhook_url?: string;
+  to?: string;
   path?: string;
 }
 
@@ -106,6 +108,23 @@ export interface CreateProjectInput {
 
 export interface UpdateIssueInput {
   status: string;
+  snoozeUntil?: string;
+  snoozeEventCount?: number;
+}
+
+export interface IssueComment {
+  id: number;
+  issue_id: number;
+  text: string;
+  created_at: string;
+}
+
+export interface IssueActivity {
+  id: number;
+  issue_id: number;
+  kind: string;
+  data: string | null;
+  created_at: string;
 }
 
 export interface ProjectStats {

@@ -7,6 +7,7 @@ import type { Project } from "~/lib/sentry-types";
 import IconCircleDot from "~icons/lucide/circle-dot";
 import IconTag from "~icons/lucide/tag";
 import IconBell from "~icons/lucide/bell";
+import IconGauge from "~icons/lucide/gauge";
 import IconSettings from "~icons/lucide/settings";
 
 export default function Sidebar() {
@@ -59,6 +60,12 @@ export default function Sidebar() {
             class="sidebar__link"
           >
             <IconTag /> Releases
+          </A>
+          <A
+            href={`/${params.project}/performance`}
+            class="sidebar__link"
+          >
+            <IconGauge /> Performance
           </A>
           <A
             href={`/${params.project}/alerts`}
