@@ -661,7 +661,39 @@ pre, code {
 }
 
 .checkbox {
-  accent-color: var(--color-text-primary);
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-text-secondary);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+  vertical-align: middle;
+  flex-shrink: 0;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.checkbox:hover {
+  border-color: var(--color-text-primary);
+}
+
+.checkbox:checked {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.checkbox:checked::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0px;
+  width: 5px;
+  height: 9px;
+  border: solid var(--color-accent-fg);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
 }
 
 label.field-label {
