@@ -23,4 +23,14 @@ pub fn normalize(event: &mut SentryEvent) {
     if event.level.is_none() {
         event.level = Some("error".to_string());
     }
+
+    // Normalize fingerprint: {{ default }} means use server-side grouping
+    if let Some(fp) = &event.fingerprint {
+        let all_default = fp.iter().all(|v| {
+            v.as_str().map(|s| s == "{{ default }}").unwrap_or(false)
+        });
+        if all_default {
+            event.fingerprint = None;
+        }
+    }
 }

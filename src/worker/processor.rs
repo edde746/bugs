@@ -314,7 +314,7 @@ async fn process_inner(
     }
 
     if !processed_any {
-        return Err("No event items found in envelope".into());
+        debug!(envelope_id, "Envelope contained no event items, skipping");
     }
 
     Ok(())

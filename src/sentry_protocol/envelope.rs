@@ -33,9 +33,13 @@ pub struct EnvelopeItem {
     pub payload: Bytes,
 }
 
+fn default_item_type() -> String {
+    "event".to_string()
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ItemHeaders {
-    #[serde(rename = "type")]
+    #[serde(default = "default_item_type", rename = "type")]
     pub item_type: String,
     pub length: Option<usize>,
     pub content_type: Option<String>,

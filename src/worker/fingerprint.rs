@@ -7,8 +7,12 @@ pub fn compute_fingerprint(event: &SentryEvent) -> String {
     if let Some(fp) = &event.fingerprint
         && !fp.is_empty()
     {
-        let parts: Vec<&str> = fp.iter().map(|s| s.as_str()).collect();
-        return fingerprint_hash(&parts);
+        let parts: Vec<String> = fp.iter().map(|v| match v {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        }).collect();
+        let parts_ref: Vec<&str> = parts.iter().map(|s| s.as_str()).collect();
+        return fingerprint_hash(&parts_ref);
     }
 
     // 2. Exception-based: type + in-app stacktrace
@@ -153,8 +157,8 @@ mod tests {
     fn test_client_fingerprint_overrides() {
         let mut e1 = make_exception_event("TypeError", "a", "fn1");
         let mut e2 = make_exception_event("RangeError", "b", "fn2");
-        e1.fingerprint = Some(vec!["custom-group".to_string()]);
-        e2.fingerprint = Some(vec!["custom-group".to_string()]);
+        e1.fingerprint = Some(vec![serde_json::Value::String("custom-group".to_string())]);
+        e2.fingerprint = Some(vec![serde_json::Value::String("custom-group".to_string())]);
         assert_eq!(compute_fingerprint(&e1), compute_fingerprint(&e2));
     }
 
