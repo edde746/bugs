@@ -25,6 +25,11 @@ export default function SettingsProjectDetail() {
     enabled: !!projectQuery.data,
   }));
 
+  const buildDsn = (publicKey: string, projectId: number) => {
+    const { protocol, host } = window.location;
+    return `${protocol}//${publicKey}@${host}/${projectId}`;
+  };
+
   const [copiedId, setCopiedId] = createSignal<string | null>(null);
 
   const copyToClipboard = (text: string, id: string) => {
@@ -108,13 +113,13 @@ export default function SettingsProjectDetail() {
                               <div class="dsn-card__field">
                                 <label>DSN</label>
                                 <div class="dsn-card__field-value">
-                                  <code>{key.dsn}</code>
+                                  <code>{buildDsn(key.public_key, key.project_id)}</code>
                                   <Button
                                     variant="ghost"
                                     size="sm"
                                     onClick={() =>
                                       copyToClipboard(
-                                        key.dsn,
+                                        buildDsn(key.public_key, key.project_id),
                                         `dsn-${key.id}`,
                                       )
                                     }
