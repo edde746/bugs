@@ -158,5 +158,8 @@ jobs:
 
       - run: |
           tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< '${{ steps.meta.outputs.json }}')
-          source_images=$(for f in /tmp/digests/*; do echo "ghcr.io/${{ github.repository }}@$(cat "$f")"; done)
-          eval "docker buildx imagetools create $tags $source_images"
+          source_images=""
+          for f in /tmp/digests/*; do
+            source_images="$source_images ghcr.io/${{ github.repository }}@$(cat "$f")"
+          done
+          docker buildx imagetools create $tags $source_images
