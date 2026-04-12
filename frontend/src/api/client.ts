@@ -23,6 +23,11 @@ export async function apiRequest<T>(
 
   const response = await fetch(`${BASE_URL}${path}`, { ...options, headers });
   if (!response.ok) {
+    if (response.status === 401 && window.location.pathname !== "/login") {
+      localStorage.removeItem("bugs_admin_token");
+      window.location.href = "/login";
+      throw new ApiError(response.status, response.statusText, null);
+    }
     const body = await response.json().catch(() => null);
     throw new ApiError(response.status, response.statusText, body);
   }

@@ -15,14 +15,20 @@ pub mod user_reports;
 
 use crate::AppState;
 use axum::{
-    Router,
+    Json, Router,
     extract::State,
     http::{StatusCode, header},
     middleware,
     response::Response,
+    routing::{get, post},
 };
 
 pub fn router(state: &AppState) -> Router<AppState> {
+    // Auth routes - outside auth middleware so they're always accessible
+    let auth_routes = Router::new()
+        .route("/api/internal/auth/status", get(auth_status))
+        .route("/api/internal/auth/check", post(auth_check));
+
     // Management routes that require admin auth
     let management_routes = Router::new()
         .merge(projects::routes())
@@ -42,8 +48,34 @@ pub fn router(state: &AppState) -> Router<AppState> {
 
     Router::new()
         .merge(ingest::routes())
+        .merge(auth_routes)
         .merge(management_routes)
         .merge(frontend::routes())
+}
+
+async fn auth_status(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "auth_required": !state.config.auth.admin_token.is_empty()
+    }))
+}
+
+async fn auth_check(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+) -> StatusCode {
+    let token = &state.config.auth.admin_token;
+    if token.is_empty() {
+        return StatusCode::OK;
+    }
+    let auth_header = request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok());
+    if admin_auth::check_admin_token(token, auth_header) {
+        StatusCode::OK
+    } else {
+        StatusCode::UNAUTHORIZED
+    }
 }
 
 async fn admin_auth_check(

@@ -174,7 +174,7 @@ impl Config {
     pub fn load() -> Result<Self, figment::Error> {
         Figment::from(Serialized::defaults(Config::default()))
             .merge(Toml::file("bugs.toml"))
-            .merge(Env::prefixed("BUGS_").split("_"))
+            .merge(Env::prefixed("BUGS_").split("__"))
             .extract()
     }
 }

@@ -48,34 +48,34 @@ Configuration is loaded from (highest precedence first):
 | `BUGS_RETENTION_DAYS` | `retention_days` | `90` | Days to keep events |
 | `BUGS_ENVELOPE_RETENTION_HOURS` | `envelope_retention_hours` | `24` | Hours to keep raw envelopes |
 | `BUGS_WORKER_THREADS` | `worker_threads` | `4` | Background processing threads |
-| `BUGS_AUTH_ADMIN_TOKEN` | `auth.admin_token` | *(empty)* | Bearer token for management API |
+| `BUGS_AUTH__ADMIN_TOKEN` | `auth.admin_token` | *(empty)* | Bearer token for management API |
 | `BUGS_PUBLIC_URL` | `public_url` | *(none)* | Public URL for generated DSNs |
 
 ### SQLite tuning
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BUGS_SQLITE_SYNCHRONOUS` | `NORMAL` | SQLite synchronous mode |
-| `BUGS_SQLITE_CACHE_SIZE_MB` | `64` | Page cache size |
-| `BUGS_SQLITE_READER_CONNECTIONS` | `8` | Read connection pool size |
-| `BUGS_SQLITE_MMAP_SIZE_MB` | `256` | Memory-mapped I/O size |
-| `BUGS_SQLITE_CHECKPOINT_INTERVAL_BATCHES` | `10` | WAL checkpoint frequency |
+| `BUGS_SQLITE__SYNCHRONOUS` | `NORMAL` | SQLite synchronous mode |
+| `BUGS_SQLITE__CACHE_SIZE_MB` | `64` | Page cache size |
+| `BUGS_SQLITE__READER_CONNECTIONS` | `8` | Read connection pool size |
+| `BUGS_SQLITE__MMAP_SIZE_MB` | `256` | Memory-mapped I/O size |
+| `BUGS_SQLITE__CHECKPOINT_INTERVAL_BATCHES` | `10` | WAL checkpoint frequency |
 
 ### Ingest limits
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BUGS_INGEST_MAX_RAW_REQUEST_BYTES` | `20 MB` | Max raw request body |
-| `BUGS_INGEST_MAX_ENVELOPE_BYTES` | `10 MB` | Max decompressed envelope |
-| `BUGS_INGEST_MAX_EVENT_ITEM_BYTES` | `1 MB` | Max single event item |
-| `BUGS_INGEST_MAX_ATTACHMENT_BYTES` | `10 MB` | Max attachment size |
-| `BUGS_INGEST_MAX_ITEMS_PER_ENVELOPE` | `100` | Max items per envelope |
+| `BUGS_INGEST__MAX_RAW_REQUEST_BYTES` | `20 MB` | Max raw request body |
+| `BUGS_INGEST__MAX_ENVELOPE_BYTES` | `10 MB` | Max decompressed envelope |
+| `BUGS_INGEST__MAX_EVENT_ITEM_BYTES` | `1 MB` | Max single event item |
+| `BUGS_INGEST__MAX_ATTACHMENT_BYTES` | `10 MB` | Max attachment size |
+| `BUGS_INGEST__MAX_ITEMS_PER_ENVELOPE` | `100` | Max items per envelope |
 
 ## Authentication
 
 ### Admin API
 
-Set `BUGS_AUTH_ADMIN_TOKEN` to secure the management API. Requests must include `Authorization: Bearer <token>`. If no token is configured, the management API is open — a warning is logged at startup.
+Set `BUGS_AUTH__ADMIN_TOKEN` to secure the management API and web UI. Requests must include `Authorization: Bearer <token>`. The web UI will show a login page when auth is enabled. If no token is configured, the management API is open — a warning is logged at startup.
 
 ### Ingest
 
@@ -115,7 +115,7 @@ services:
     volumes:
       - bugs-data:/data
     environment:
-      BUGS_AUTH_ADMIN_TOKEN: "change-me-to-a-secret-token"
+      BUGS_AUTH__ADMIN_TOKEN: "change-me-to-a-secret-token"
       BUGS_PUBLIC_URL: "https://bugs.example.com"
       BUGS_RETENTION_DAYS: "90"
 

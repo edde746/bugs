@@ -14,12 +14,17 @@ const ProjectAlerts = lazy(() => import("~/pages/ProjectAlerts"));
 const ProjectPerformance = lazy(() => import("~/pages/ProjectPerformance"));
 const SettingsProjects = lazy(() => import("~/pages/SettingsProjects"));
 const SettingsProjectDetail = lazy(() => import("~/pages/SettingsProjectDetail"));
+const Login = lazy(() => import("~/pages/Login"));
 const NotFound = lazy(() => import("~/pages/NotFound"));
 
 export const routes: RouteDefinition[] = [
   {
     path: "/",
     component: Home,
+  },
+  {
+    path: "/login",
+    component: Login,
   },
   {
     path: "/onboarding",

@@ -9,9 +9,11 @@ import IconTag from "~icons/lucide/tag";
 import IconBell from "~icons/lucide/bell";
 import IconGauge from "~icons/lucide/gauge";
 import IconSettings from "~icons/lucide/settings";
+import IconLogOut from "~icons/lucide/log-out";
 
 export default function Sidebar() {
   const params = useParams<{ project?: string }>();
+  const hasToken = () => !!localStorage.getItem("bugs_admin_token");
 
   const projectsQuery = createQuery(() => ({
     queryKey: queryKeys.projects.all(),
@@ -80,6 +82,17 @@ export default function Sidebar() {
         <A href="/settings/projects" class="sidebar__link">
           <IconSettings /> Settings
         </A>
+        {hasToken() && (
+          <button
+            class="sidebar__link"
+            onClick={() => {
+              localStorage.removeItem("bugs_admin_token");
+              window.location.href = "/login";
+            }}
+          >
+            <IconLogOut /> Logout
+          </button>
+        )}
       </div>
     </aside>
   );
