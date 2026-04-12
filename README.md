@@ -9,6 +9,10 @@ Bugs receives, processes, and visualizes application errors with source map supp
 ### Docker
 
 ```bash
+# Using the pre-built image from GitHub Container Registry
+docker run -p 9000:9000 -v bugs-data:/data ghcr.io/edde746/bugs:latest
+
+# Or build from source
 docker build -t bugs .
 docker run -p 9000:9000 -v bugs-data:/data bugs
 ```
@@ -99,6 +103,22 @@ cargo watch -x run
 cd frontend && bun run dev
 ```
 
-## License
+## Production Docker Compose
 
-See [LICENSE](LICENSE) for details.
+```yaml
+services:
+  bugs:
+    image: ghcr.io/edde746/bugs:latest
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    volumes:
+      - bugs-data:/data
+    environment:
+      BUGS_AUTH_ADMIN_TOKEN: "change-me-to-a-secret-token"
+      BUGS_PUBLIC_URL: "https://bugs.example.com"
+      BUGS_RETENTION_DAYS: "90"
+
+volumes:
+  bugs-data:
+```
