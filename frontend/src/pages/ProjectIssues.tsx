@@ -3,7 +3,7 @@ import { createQuery } from "@tanstack/solid-query";
 import { createSignal, For, Show } from "solid-js";
 import { api } from "~/api/client";
 import { queryKeys } from "~/queries/keys";
-import type { IssueListResponse } from "~/lib/sentry-types";
+import type { IssueListResponse, IssueFilterOptions } from "~/lib/sentry-types";
 import { formatNumber } from "~/lib/formatters";
 import { STATUS_LABELS } from "~/lib/constants";
 import Badge from "~/components/ui/Badge";
@@ -27,27 +27,52 @@ export default function ProjectIssues() {
     status?: string;
     sort?: string;
     cursor?: string;
+    release?: string;
+    environment?: string;
+    level?: string;
   }>();
 
   const status = () => searchParams.status ?? "unresolved";
   const sort = () => searchParams.sort ?? "last_seen";
   const cursor = () => searchParams.cursor ?? "";
+  const release = () => searchParams.release ?? "";
+  const environment = () => searchParams.environment ?? "";
+  const level = () => searchParams.level ?? "";
 
   const [selectedIssues, setSelectedIssues] = createSignal<Set<number>>(
     new Set(),
   );
 
-  const filters = () => ({ status: status(), sort: sort(), cursor: cursor() });
+  const filters = () => ({
+    status: status(),
+    sort: sort(),
+    cursor: cursor(),
+    release: release(),
+    environment: environment(),
+    level: level(),
+  });
 
   const issuesQuery = createQuery(() => ({
     queryKey: queryKeys.issues.list(params.project, filters()),
     queryFn: () => {
       let url = `/internal/projects/${params.project}/issues?status=${status()}&sort=${sort()}`;
       if (cursor()) url += `&cursor=${cursor()}`;
+      if (release()) url += `&release=${encodeURIComponent(release())}`;
+      if (environment()) url += `&environment=${encodeURIComponent(environment())}`;
+      if (level()) url += `&level=${encodeURIComponent(level())}`;
       return api.get<IssueListResponse>(url);
     },
     refetchInterval: 30000,
     refetchIntervalInBackground: false,
+  }));
+
+  const filtersQuery = createQuery(() => ({
+    queryKey: queryKeys.issues.filters(params.project),
+    queryFn: () =>
+      api.get<IssueFilterOptions>(
+        `/internal/projects/${params.project}/issues/filters`,
+      ),
+    staleTime: 60000,
   }));
 
   const toggleSelectAll = () => {
@@ -107,6 +132,67 @@ export default function ProjectIssues() {
           </select>
         </div>
       </div>
+
+      <Show when={filtersQuery.data}>
+        <div class="filter-bar__filters">
+          <div class="filter-bar__group">
+            <label class="filter-bar__sort-label">Release:</label>
+            <select
+              value={release()}
+              onChange={(e) =>
+                setSearchParams({
+                  release: e.currentTarget.value || undefined,
+                  cursor: undefined,
+                })
+              }
+              class="select"
+            >
+              <option value="">All Releases</option>
+              <For each={filtersQuery.data!.releases}>
+                {(r) => <option value={r}>{r}</option>}
+              </For>
+            </select>
+          </div>
+
+          <div class="filter-bar__group">
+            <label class="filter-bar__sort-label">Environment:</label>
+            <select
+              value={environment()}
+              onChange={(e) =>
+                setSearchParams({
+                  environment: e.currentTarget.value || undefined,
+                  cursor: undefined,
+                })
+              }
+              class="select"
+            >
+              <option value="">All Environments</option>
+              <For each={filtersQuery.data!.environments}>
+                {(env) => <option value={env}>{env}</option>}
+              </For>
+            </select>
+          </div>
+
+          <div class="filter-bar__group">
+            <label class="filter-bar__sort-label">Level:</label>
+            <select
+              value={level()}
+              onChange={(e) =>
+                setSearchParams({
+                  level: e.currentTarget.value || undefined,
+                  cursor: undefined,
+                })
+              }
+              class="select"
+            >
+              <option value="">All Levels</option>
+              <For each={filtersQuery.data!.levels}>
+                {(l) => <option value={l}>{l}</option>}
+              </For>
+            </select>
+          </div>
+        </div>
+      </Show>
 
       <Show when={!issuesQuery.isPending} fallback={<LoadingSkeleton rows={8} />}>
         <Show

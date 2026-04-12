@@ -1632,6 +1632,20 @@ label.field-label--sm {
   color: var(--color-text-secondary);
 }
 
+.filter-bar__filters {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 0;
+  margin-bottom: 16px;
+}
+
+.filter-bar__group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* ===================================================================
    TABLE FOOTER
    =================================================================== */

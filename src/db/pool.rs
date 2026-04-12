@@ -150,6 +150,7 @@ impl DbPool {
             include_str!("../../migrations/009_deploys.sql"),
             include_str!("../../migrations/010_performance.sql"),
             include_str!("../../migrations/011_issue_sort_indexes.sql"),
+            include_str!("../../migrations/012_issue_filter_indexes.sql"),
         ];
 
         for (i, sql) in migrations.iter().enumerate() {

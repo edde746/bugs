@@ -13,6 +13,10 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/internal/projects/{slug}/issues", get(list_issues))
         .route(
+            "/api/internal/projects/{slug}/issues/filters",
+            get(list_issue_filters),
+        )
+        .route(
             "/api/internal/issues/{id}",
             get(get_issue).put(update_issue).delete(delete_issue),
         )
@@ -23,8 +27,10 @@ struct IssueQuery {
     status: Option<String>,
     sort: Option<String>,
     cursor: Option<String>,
-    #[allow(dead_code)]
     query: Option<String>,
+    release: Option<String>,
+    environment: Option<String>,
+    level: Option<String>,
     #[serde(default = "default_limit")]
     limit: i64,
 }
@@ -53,18 +59,21 @@ fn encode_cursor(sort_value: &str, id: i64) -> String {
     URL_SAFE_NO_PAD.encode(&json)
 }
 
+async fn resolve_project_id(state: &AppState, slug: &str) -> Result<i64, StatusCode> {
+    let project: Option<(i64,)> = sqlx::query_as("SELECT id FROM projects WHERE slug = ?")
+        .bind(slug)
+        .fetch_optional(state.db.reader())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    project.ok_or(StatusCode::NOT_FOUND).map(|p| p.0)
+}
+
 async fn list_issues(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Query(params): Query<IssueQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let project: Option<(i64,)> = sqlx::query_as("SELECT id FROM projects WHERE slug = ?")
-        .bind(&slug)
-        .fetch_optional(state.db.reader())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let project_id = project.ok_or(StatusCode::NOT_FOUND)?.0;
+    let project_id = resolve_project_id(&state, &slug).await?;
 
     let limit = params.limit.min(100);
     let status = params.status.as_deref().unwrap_or("unresolved");
@@ -74,36 +83,89 @@ async fn list_issues(
         _ => "last_seen",
     };
 
+    let query_like = params
+        .query
+        .as_ref()
+        .filter(|q| !q.is_empty())
+        .map(|q| format!("%{q}%"));
+
+    let mut extra_where = String::new();
+    if params.level.is_some() {
+        extra_where.push_str(" AND level = ?");
+    }
+    if params.release.is_some() || params.environment.is_some() {
+        let mut event_conds = vec!["issue_id = issues.id", "project_id = ?"];
+        if params.release.is_some() {
+            event_conds.push("release = ?");
+        }
+        if params.environment.is_some() {
+            event_conds.push("environment = ?");
+        }
+        extra_where.push_str(&format!(
+            " AND EXISTS (SELECT 1 FROM events WHERE {})",
+            event_conds.join(" AND ")
+        ));
+    }
+    if query_like.is_some() {
+        extra_where.push_str(" AND title LIKE ?");
+    }
+
+    macro_rules! bind_filters {
+        ($q:expr) => {{
+            let mut q = $q;
+            if let Some(ref v) = params.level {
+                q = q.bind(v.as_str());
+            }
+            if params.release.is_some() || params.environment.is_some() {
+                q = q.bind(project_id);
+                if let Some(ref v) = params.release {
+                    q = q.bind(v.as_str());
+                }
+                if let Some(ref v) = params.environment {
+                    q = q.bind(v.as_str());
+                }
+            }
+            if let Some(ref v) = query_like {
+                q = q.bind(v.as_str());
+            }
+            q
+        }};
+    }
+
     let issues: Vec<Issue> = if let Some(ref cursor_str) = params.cursor {
         if let Some(cursor) = decode_cursor(cursor_str) {
-            sqlx::query_as(&format!(
+            let sql = format!(
                 "SELECT * FROM issues WHERE project_id = ? AND status = ? \
-                 AND ({sort_col} < ? OR ({sort_col} = ? AND id < ?)) \
+                 AND ({sort_col} < ? OR ({sort_col} = ? AND id < ?)){extra_where} \
                  ORDER BY {sort_col} DESC, id DESC LIMIT ?"
-            ))
-            .bind(project_id)
-            .bind(status)
-            .bind(&cursor.v)
-            .bind(&cursor.v)
-            .bind(cursor.id)
-            .bind(limit + 1)
-            .fetch_all(state.db.reader())
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            );
+            let q = sqlx::query_as::<_, Issue>(&sql)
+                .bind(project_id)
+                .bind(status)
+                .bind(cursor.v.as_str())
+                .bind(cursor.v.as_str())
+                .bind(cursor.id);
+            bind_filters!(q)
+                .bind(limit + 1)
+                .fetch_all(state.db.reader())
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         } else {
             return Err(StatusCode::BAD_REQUEST);
         }
     } else {
-        sqlx::query_as(&format!(
-            "SELECT * FROM issues WHERE project_id = ? AND status = ? \
+        let sql = format!(
+            "SELECT * FROM issues WHERE project_id = ? AND status = ?{extra_where} \
              ORDER BY {sort_col} DESC, id DESC LIMIT ?"
-        ))
-        .bind(project_id)
-        .bind(status)
-        .bind(limit + 1)
-        .fetch_all(state.db.reader())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        );
+        let q = sqlx::query_as::<_, Issue>(&sql)
+            .bind(project_id)
+            .bind(status);
+        bind_filters!(q)
+            .bind(limit + 1)
+            .fetch_all(state.db.reader())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };
 
     let has_next = issues.len() as i64 > limit;
@@ -124,6 +186,40 @@ async fn list_issues(
     Ok(Json(serde_json::json!({
         "issues": items,
         "nextCursor": next_cursor,
+    })))
+}
+
+async fn list_issue_filters(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let project_id = resolve_project_id(&state, &slug).await?;
+
+    let (releases, environments, levels) = tokio::try_join!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT release FROM events \
+             WHERE project_id = ? AND release IS NOT NULL ORDER BY release LIMIT 100"
+        )
+        .bind(project_id)
+        .fetch_all(state.db.reader()),
+        sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT environment FROM events \
+             WHERE project_id = ? AND environment IS NOT NULL ORDER BY environment LIMIT 100"
+        )
+        .bind(project_id)
+        .fetch_all(state.db.reader()),
+        sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT level FROM issues WHERE project_id = ? ORDER BY level"
+        )
+        .bind(project_id)
+        .fetch_all(state.db.reader()),
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(serde_json::json!({
+        "releases": releases,
+        "environments": environments,
+        "levels": levels,
     })))
 }
 

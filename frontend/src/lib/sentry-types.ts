@@ -94,6 +94,12 @@ export interface AlertRuleResponse {
   created_at: string;
 }
 
+export interface IssueFilterOptions {
+  releases: string[];
+  environments: string[];
+  levels: string[];
+}
+
 export interface ProjectReleaseSummary {
   version: string;
   created_at: string;
