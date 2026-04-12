@@ -59,10 +59,7 @@ async fn auth_status(State(state): State<AppState>) -> Json<serde_json::Value> {
     }))
 }
 
-async fn auth_check(
-    State(state): State<AppState>,
-    request: axum::extract::Request,
-) -> StatusCode {
+async fn auth_check(State(state): State<AppState>, request: axum::extract::Request) -> StatusCode {
     let token = &state.config.auth.admin_token;
     if token.is_empty() {
         return StatusCode::OK;
