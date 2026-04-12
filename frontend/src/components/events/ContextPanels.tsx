@@ -77,7 +77,7 @@ export default function ContextPanels(props: ContextPanelsProps) {
   return (
     <Show when={tabs().length > 0}>
       <div class="card">
-        <div class="tabs" style={{ background: "var(--color-surface-1)", "overflow-x": "auto", "border-bottom": "1px solid var(--color-border)" }}>
+        <div class="tabs" style={{ background: "var(--color-surface-1)", "overflow-x": "auto" }}>
           <For each={tabs()}>
             {(tab, index) => (
               <button
