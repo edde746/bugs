@@ -16,6 +16,8 @@ import TagsTable from "~/components/events/TagsTable";
 import CopyButton from "~/components/ui/CopyButton";
 import IconArrowLeft from "~icons/lucide/arrow-left";
 import IconArrowRight from "~icons/lucide/arrow-right";
+import IconEye from "~icons/lucide/eye";
+import IconEyeOff from "~icons/lucide/eye-off";
 import type { ExceptionValue } from "~/components/events/ExceptionDisplay";
 import type { Breadcrumb } from "~/components/events/BreadcrumbsTimeline";
 
@@ -36,6 +38,7 @@ export default function IssueDetail() {
   const params = useParams<{ project: string; issueId: string }>();
   const queryClient = useQueryClient();
   const [eventIndex, setEventIndex] = createSignal(0);
+  const [showRaw, setShowRaw] = createSignal(false);
 
   const issueQuery = createQuery(() => ({
     queryKey: queryKeys.issues.detail(params.issueId),
@@ -445,16 +448,6 @@ export default function IssueDetail() {
                 >
                   Older <IconArrowRight />
                 </Button>
-                <Show when={currentEvent()}>
-                  {(ev) => (
-                    <A
-                      href={`/${params.project}/issues/${params.issueId}/events/${ev().id}`}
-                      class="link-accent"
-                    >
-                      View Full Event
-                    </A>
-                  )}
-                </Show>
               </div>
             </div>
 
@@ -475,6 +468,15 @@ export default function IssueDetail() {
                       <Show when={event().platform}>
                         <span class="meta-tag">{event().platform}</span>
                       </Show>
+                      <Show when={event().environment}>
+                        <span>Env: {event().environment}</span>
+                      </Show>
+                      <Show when={event().release}>
+                        <span>Release: {event().release}</span>
+                      </Show>
+                      <Show when={event().transaction_name}>
+                        <span>Transaction: {event().transaction_name}</span>
+                      </Show>
                     </div>
 
                     <Show when={exceptions().length > 0}>
@@ -494,6 +496,23 @@ export default function IssueDetail() {
                       request={request()}
                       user={user()}
                     />
+
+                    <div class="raw-json">
+                      <button
+                        class="raw-json__toggle"
+                        onClick={() => setShowRaw(!showRaw())}
+                      >
+                        <span class="raw-json__toggle-label">Raw JSON</span>
+                        <span class="raw-json__toggle-icon">
+                          {showRaw() ? <IconEyeOff /> : <IconEye />}
+                        </span>
+                      </button>
+                      <Show when={showRaw()}>
+                        <pre class="raw-json__content">
+                          {JSON.stringify(parsedData(), null, 2)}
+                        </pre>
+                      </Show>
+                    </div>
                   </div>
                 )}
               </Show>
@@ -502,7 +521,10 @@ export default function IssueDetail() {
             {/* Activity timeline */}
             <Show when={activityQuery.data && activityQuery.data.length > 0}>
               <div class="card" style={{ "margin-top": "24px" }}>
-                <h3 style={{ "margin-bottom": "12px" }}>Activity</h3>
+                <div class="card__header">
+                  <h3>Activity</h3>
+                  <span class="text-xs text-secondary">{activityQuery.data!.length} events</span>
+                </div>
                 <div class="activity-timeline">
                   <For each={activityQuery.data}>
                     {(item) => (
@@ -519,10 +541,17 @@ export default function IssueDetail() {
 
             {/* Comments section */}
             <div class="card" style={{ "margin-top": "24px" }}>
-              <h3 style={{ "margin-bottom": "12px" }}>Comments</h3>
+              <div class="card__header">
+                <h3>Comments</h3>
+                <Show when={commentsQuery.data}>
+                  <span class="text-xs text-secondary">
+                    {commentsQuery.data!.length} comment{commentsQuery.data!.length !== 1 ? "s" : ""}
+                  </span>
+                </Show>
+              </div>
 
               <Show when={commentsQuery.data && commentsQuery.data.length > 0}>
-                <div class="section-gap" style={{ "margin-bottom": "16px" }}>
+                <div class="card__body comment-list">
                   <For each={commentsQuery.data}>
                     {(comment) => (
                       <div class="comment">
@@ -542,7 +571,7 @@ export default function IssueDetail() {
                 </div>
               </Show>
 
-              <div style={{ display: "flex", gap: "8px" }}>
+              <div class="comment-compose">
                 <textarea
                   class="comment__input"
                   placeholder="Add a comment..."
@@ -555,14 +584,17 @@ export default function IssueDetail() {
                   }}
                   rows={2}
                 />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleAddComment}
-                  disabled={addCommentMutation.isPending || !commentText().trim()}
-                >
-                  Post
-                </Button>
+                <div class="comment-compose__actions">
+                  <span class="text-xs text-secondary">Ctrl+Enter to post</span>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleAddComment}
+                    disabled={addCommentMutation.isPending || !commentText().trim()}
+                  >
+                    Post
+                  </Button>
+                </div>
               </div>
             </div>
           </>
