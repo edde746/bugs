@@ -52,7 +52,10 @@ async fn create_project(
     .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
     // Auto-create a default project key
-    let public_key = generate_public_key();
+    let public_key = input
+        .public_key
+        .filter(|k| !k.is_empty())
+        .unwrap_or_else(generate_public_key);
     sqlx::query("INSERT INTO project_keys (project_id, public_key) VALUES (?, ?)")
         .bind(result.id)
         .bind(&public_key)

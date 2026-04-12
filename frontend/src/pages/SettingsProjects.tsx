@@ -9,11 +9,15 @@ import Button from "~/components/ui/Button";
 import Modal from "~/components/ui/Modal";
 import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
 import EmptyState from "~/components/ui/EmptyState";
+import IconChevronDown from "~icons/lucide/chevron-down";
+import IconChevronRight from "~icons/lucide/chevron-right";
 
 export default function SettingsProjects() {
   const queryClient = useQueryClient();
   const [name, setName] = createSignal("");
   const [slug, setSlug] = createSignal("");
+  const [publicKey, setPublicKey] = createSignal("");
+  const [showAdvanced, setShowAdvanced] = createSignal(false);
   const [showModal, setShowModal] = createSignal(false);
 
   const projectsQuery = createQuery(() => ({
@@ -28,6 +32,8 @@ export default function SettingsProjects() {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects.all() });
       setName("");
       setSlug("");
+      setPublicKey("");
+      setShowAdvanced(false);
       setShowModal(false);
     },
   }));
@@ -69,7 +75,9 @@ export default function SettingsProjects() {
               disabled={createMut.isPending || !name().trim()}
               onClick={() => {
                 if (!name().trim() || !slug().trim()) return;
-                createMut.mutate({ name: name(), slug: slug() });
+                const input: CreateProjectInput = { name: name(), slug: slug() };
+                if (publicKey().trim()) input.public_key = publicKey().trim();
+                createMut.mutate(input);
               }}
             >
               {createMut.isPending ? "Creating..." : "Create"}
@@ -97,6 +105,33 @@ export default function SettingsProjects() {
               placeholder="my-project"
               class="input"
             />
+          </div>
+          <div>
+            <button
+              type="button"
+              class="btn btn--sm"
+              data-variant="ghost"
+              onClick={() => setShowAdvanced(!showAdvanced())}
+              style={{ padding: "0", gap: "4px" }}
+            >
+              {showAdvanced() ? <IconChevronDown /> : <IconChevronRight />}
+              Advanced
+            </button>
+            <Show when={showAdvanced()}>
+              <div class="form-field" style={{ "margin-top": "12px" }}>
+                <label class="field-label">DSN Key</label>
+                <input
+                  type="text"
+                  value={publicKey()}
+                  onInput={(e) => setPublicKey(e.currentTarget.value)}
+                  placeholder="Leave empty to auto-generate"
+                  class="input"
+                />
+                <span class="text-secondary" style={{ "font-size": "11px", "margin-top": "4px", display: "block" }}>
+                  Override the auto-generated public key used in the DSN.
+                </span>
+              </div>
+            </Show>
           </div>
         </div>
       </Modal>

@@ -35,6 +35,7 @@ pub struct CreateProject {
     pub name: String,
     pub slug: String,
     pub platform: Option<String>,
+    pub public_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

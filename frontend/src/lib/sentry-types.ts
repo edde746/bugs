@@ -104,6 +104,7 @@ export interface CreateProjectInput {
   name: string;
   slug: string;
   platform?: string;
+  public_key?: string;
 }
 
 export interface UpdateIssueInput {
