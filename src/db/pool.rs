@@ -126,6 +126,18 @@ impl DbPool {
             .execute(&self.writer)
             .await?;
 
+        // Track which migrations have been applied
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')))"
+        )
+        .execute(&self.writer)
+        .await?;
+
+        let current_version: i64 =
+            sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM _migrations")
+                .fetch_one(&self.writer)
+                .await?;
+
         let migrations = [
             include_str!("../../migrations/001_initial_schema.sql"),
             include_str!("../../migrations/002_fts5_indexes.sql"),
@@ -141,6 +153,11 @@ impl DbPool {
         ];
 
         for (i, sql) in migrations.iter().enumerate() {
+            let version = (i + 1) as i64;
+            if version <= current_version {
+                continue;
+            }
+
             for statement in split_sql_statements(sql) {
                 let trimmed = statement.trim();
                 if trimmed.is_empty() {
@@ -150,11 +167,17 @@ impl DbPool {
                     .execute(&self.writer)
                     .await
                     .map_err(|e| {
-                        tracing::error!(migration = i + 1, statement = %trimmed, "Migration failed: {e}");
+                        tracing::error!(migration = version, statement = %trimmed, "Migration failed: {e}");
                         e
                     })?;
             }
-            info!(migration = i + 1, "Migration applied");
+
+            sqlx::query("INSERT INTO _migrations (version) VALUES (?)")
+                .bind(version)
+                .execute(&self.writer)
+                .await?;
+
+            info!(migration = version, "Migration applied");
         }
 
         Ok(())
