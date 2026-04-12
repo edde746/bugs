@@ -4,7 +4,7 @@ import { For, Show } from "solid-js";
 import { api } from "~/api/client";
 import type { ProjectReleaseSummary } from "~/lib/sentry-types";
 import { relativeTime } from "~/lib/formatters";
-import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
+import LoadingSpinner from "~/components/ui/LoadingSpinner";
 import EmptyState from "~/components/ui/EmptyState";
 
 export default function ProjectReleases() {
@@ -24,7 +24,7 @@ export default function ProjectReleases() {
         <h1 class="page__title">Releases</h1>
       </div>
 
-      <Show when={!releasesQuery.isPending} fallback={<LoadingSkeleton rows={6} />}>
+      <Show when={!releasesQuery.isPending} fallback={<LoadingSpinner />}>
         <Show
           when={releasesQuery.data && releasesQuery.data.length > 0}
           fallback={

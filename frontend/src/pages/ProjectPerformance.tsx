@@ -3,7 +3,7 @@ import { createQuery } from "@tanstack/solid-query";
 import { For, Show } from "solid-js";
 import { api } from "~/api/client";
 import { relativeTime } from "~/lib/formatters";
-import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
+import LoadingSpinner from "~/components/ui/LoadingSpinner";
 import EmptyState from "~/components/ui/EmptyState";
 
 interface TransactionGroup {
@@ -51,7 +51,7 @@ export default function ProjectPerformance() {
         <h1 class="page__title">Performance</h1>
       </div>
 
-      <Show when={!query.isPending} fallback={<LoadingSkeleton rows={6} />}>
+      <Show when={!query.isPending} fallback={<LoadingSpinner />}>
         <Show
           when={query.data && query.data.length > 0}
           fallback={

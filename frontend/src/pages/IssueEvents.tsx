@@ -7,7 +7,7 @@ import type { EventListResponse } from "~/lib/sentry-types";
 import { relativeTime } from "~/lib/formatters";
 import Badge from "~/components/ui/Badge";
 import Button from "~/components/ui/Button";
-import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
+import LoadingSpinner from "~/components/ui/LoadingSpinner";
 import EmptyState from "~/components/ui/EmptyState";
 import IconArrowLeft from "~icons/lucide/arrow-left";
 import IconArrowRight from "~icons/lucide/arrow-right";
@@ -45,7 +45,7 @@ export default function IssueEvents() {
         </p>
       </div>
 
-      <Show when={!eventsQuery.isPending} fallback={<LoadingSkeleton rows={8} />}>
+      <Show when={!eventsQuery.isPending} fallback={<LoadingSpinner />}>
         <Show
           when={eventsQuery.data && eventsQuery.data.events.length > 0}
           fallback={

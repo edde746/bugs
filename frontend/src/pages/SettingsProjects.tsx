@@ -7,7 +7,7 @@ import type { Project, CreateProjectInput } from "~/lib/sentry-types";
 import { slugify } from "~/lib/formatters";
 import Button from "~/components/ui/Button";
 import Modal from "~/components/ui/Modal";
-import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
+import LoadingSpinner from "~/components/ui/LoadingSpinner";
 import EmptyState from "~/components/ui/EmptyState";
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconChevronRight from "~icons/lucide/chevron-right";
@@ -136,7 +136,7 @@ export default function SettingsProjects() {
         </div>
       </Modal>
 
-      <Show when={!projectsQuery.isPending} fallback={<LoadingSkeleton rows={4} />}>
+      <Show when={!projectsQuery.isPending} fallback={<LoadingSpinner />}>
         <Show
           when={projectsQuery.data && projectsQuery.data.length > 0}
           fallback={

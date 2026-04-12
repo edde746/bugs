@@ -6,7 +6,7 @@ import type { AlertRuleResponse } from "~/lib/sentry-types";
 import { relativeTime } from "~/lib/formatters";
 import Button from "~/components/ui/Button";
 import Modal from "~/components/ui/Modal";
-import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
+import LoadingSpinner from "~/components/ui/LoadingSpinner";
 import EmptyState from "~/components/ui/EmptyState";
 
 const CONDITION_TYPES = [
@@ -183,7 +183,7 @@ export default function ProjectAlerts() {
         </div>
       </Modal>
 
-      <Show when={!alertsQuery.isPending} fallback={<LoadingSkeleton rows={4} />}>
+      <Show when={!alertsQuery.isPending} fallback={<LoadingSpinner />}>
         <Show
           when={alertsQuery.data && alertsQuery.data.length > 0}
           fallback={

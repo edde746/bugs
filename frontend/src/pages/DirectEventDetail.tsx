@@ -6,7 +6,7 @@ import { queryKeys } from "~/queries/keys";
 import type { Event as SentryEvent } from "~/lib/sentry-types";
 import { relativeTime } from "~/lib/formatters";
 import Badge from "~/components/ui/Badge";
-import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
+import LoadingSpinner from "~/components/ui/LoadingSpinner";
 import ExceptionDisplay from "~/components/events/ExceptionDisplay";
 import BreadcrumbsTimeline from "~/components/events/BreadcrumbsTimeline";
 import ContextPanels from "~/components/events/ContextPanels";
@@ -76,7 +76,7 @@ export default function DirectEventDetail() {
 
   return (
     <div class="page">
-      <Show when={eventQuery.data} fallback={<LoadingSkeleton rows={10} />}>
+      <Show when={eventQuery.data} fallback={<LoadingSpinner />}>
         {(event) => (
           <div class="section-gap">
             <div>

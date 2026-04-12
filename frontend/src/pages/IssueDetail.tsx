@@ -8,7 +8,7 @@ import { relativeTime, formatNumber } from "~/lib/formatters";
 import { STATUS_LABELS } from "~/lib/constants";
 import Badge from "~/components/ui/Badge";
 import Button from "~/components/ui/Button";
-import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
+import LoadingSpinner from "~/components/ui/LoadingSpinner";
 import ExceptionDisplay from "~/components/events/ExceptionDisplay";
 import BreadcrumbsTimeline from "~/components/events/BreadcrumbsTimeline";
 import ContextPanels from "~/components/events/ContextPanels";
@@ -350,7 +350,7 @@ export default function IssueDetail() {
         <IconArrowLeft /> Back to Issues
       </A>
 
-      <Show when={issueQuery.data} fallback={<LoadingSkeleton rows={6} />}>
+      <Show when={issueQuery.data} fallback={<LoadingSpinner />}>
         {(issue) => (
           <>
             <div style={{ display: "flex", "align-items": "flex-start", "justify-content": "space-between", "margin-bottom": "24px" }}>
@@ -451,7 +451,7 @@ export default function IssueDetail() {
               </div>
             </div>
 
-            <Show when={!eventsQuery.isPending} fallback={<LoadingSkeleton rows={8} />}>
+            <Show when={!eventsQuery.isPending} fallback={<LoadingSpinner />}>
               <Show
                 when={currentEvent()}
                 fallback={

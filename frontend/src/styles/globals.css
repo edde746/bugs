@@ -124,10 +124,6 @@ pre, code {
   }
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
 
 @keyframes spin {
   from { transform: rotate(0deg); }
@@ -850,20 +846,23 @@ label.field-label--sm {
 }
 
 /* ===================================================================
-   LOADING SKELETON
+   LOADING SPINNER
    =================================================================== */
 
-.skeleton {
+.spinner {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  justify-content: center;
+  align-items: center;
+  padding: 48px 0;
 }
 
-.skeleton__line {
-  height: 16px;
-  border-radius: var(--radius);
-  background: var(--color-surface-2);
-  animation: pulse 1.5s ease-in-out infinite;
+.spinner__circle {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-text-primary);
+  border-radius: 50%;
+  animation: spin 600ms linear infinite;
 }
 
 /* ===================================================================

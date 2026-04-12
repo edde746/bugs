@@ -4,7 +4,7 @@ import { createEffect } from "solid-js";
 import { api } from "~/api/client";
 import { queryKeys } from "~/queries/keys";
 import type { Project } from "~/lib/sentry-types";
-import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
+import LoadingSpinner from "~/components/ui/LoadingSpinner";
 
 export default function Home() {
   const navigate = useNavigate();
@@ -27,7 +27,7 @@ export default function Home() {
 
   return (
     <div class="center-page">
-      <LoadingSkeleton rows={3} />
+      <LoadingSpinner />
     </div>
   );
 }

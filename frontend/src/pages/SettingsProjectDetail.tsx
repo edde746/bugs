@@ -5,7 +5,7 @@ import { api } from "~/api/client";
 import { queryKeys } from "~/queries/keys";
 import type { Project, ProjectKey } from "~/lib/sentry-types";
 import Button from "~/components/ui/Button";
-import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
+import LoadingSpinner from "~/components/ui/LoadingSpinner";
 import IconArrowLeft from "~icons/lucide/arrow-left";
 import IconClipboard from "~icons/lucide/clipboard-copy";
 import IconCheck from "~icons/lucide/check";
@@ -45,7 +45,7 @@ export default function SettingsProjectDetail() {
         <IconArrowLeft /> Back to Projects
       </A>
 
-      <Show when={projectQuery.data} fallback={<LoadingSkeleton rows={6} />}>
+      <Show when={projectQuery.data} fallback={<LoadingSpinner />}>
         {(project) => (
           <>
             <div style={{ "margin-bottom": "24px" }}>
@@ -64,7 +64,7 @@ export default function SettingsProjectDetail() {
               <div class="card__body">
                 <Show
                   when={keysQuery.data}
-                  fallback={<LoadingSkeleton rows={2} />}
+                  fallback={<LoadingSpinner />}
                 >
                   {(keys) => (
                     <Show

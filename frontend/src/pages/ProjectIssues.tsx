@@ -9,7 +9,7 @@ import { STATUS_LABELS } from "~/lib/constants";
 import Badge from "~/components/ui/Badge";
 import Button from "~/components/ui/Button";
 import RelativeTime from "~/components/ui/RelativeTime";
-import LoadingSkeleton from "~/components/ui/LoadingSkeleton";
+import LoadingSpinner from "~/components/ui/LoadingSpinner";
 import EmptyState from "~/components/ui/EmptyState";
 import IconArrowLeft from "~icons/lucide/arrow-left";
 import IconArrowRight from "~icons/lucide/arrow-right";
@@ -194,7 +194,7 @@ export default function ProjectIssues() {
         </div>
       </Show>
 
-      <Show when={!issuesQuery.isPending} fallback={<LoadingSkeleton rows={8} />}>
+      <Show when={!issuesQuery.isPending} fallback={<LoadingSpinner />}>
         <Show
           when={issuesQuery.data && issuesQuery.data.issues.length > 0}
           fallback={
