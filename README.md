@@ -49,7 +49,6 @@ Configuration is loaded from (highest precedence first):
 | `BUGS_ENVELOPE_RETENTION_HOURS` | `envelope_retention_hours` | `24` | Hours to keep raw envelopes |
 | `BUGS_WORKER_THREADS` | `worker_threads` | `4` | Background processing threads |
 | `BUGS_AUTH__ADMIN_TOKEN` | `auth.admin_token` | *(empty)* | Bearer token for management API |
-| `BUGS_PUBLIC_URL` | `public_url` | *(none)* | Public URL for generated DSNs |
 
 ### SQLite tuning
 
@@ -116,7 +115,6 @@ services:
       - bugs-data:/data
     environment:
       BUGS_AUTH__ADMIN_TOKEN: "change-me-to-a-secret-token"
-      BUGS_PUBLIC_URL: "https://bugs.example.com"
       BUGS_RETENTION_DAYS: "90"
 
 volumes:

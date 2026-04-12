@@ -23,8 +23,6 @@ pub struct Config {
     #[serde(default)]
     pub sqlite: SqliteConfig,
     #[serde(default)]
-    pub public_url: Option<String>,
-    #[serde(default)]
     pub ingest: IngestConfig,
     #[serde(default)]
     pub email: EmailConfig,
@@ -188,7 +186,6 @@ impl Default for Config {
             retention_days: default_retention_days(),
             envelope_retention_hours: default_envelope_retention_hours(),
             worker_threads: default_worker_threads(),
-            public_url: None,
             auth: AuthConfig::default(),
             sqlite: SqliteConfig::default(),
             ingest: IngestConfig::default(),

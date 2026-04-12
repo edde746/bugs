@@ -7,7 +7,6 @@ use axum::{
 
 use crate::AppState;
 use crate::models::project::*;
-use crate::sentry_protocol::dsn::build_dsn;
 use crate::util::id::generate_public_key;
 
 pub fn routes() -> Router<AppState> {
@@ -115,46 +114,13 @@ async fn delete_project(State(state): State<AppState>, Path(id): Path<i64>) -> S
 async fn list_keys(
     State(state): State<AppState>,
     Path(project_id): Path<i64>,
-) -> Result<Json<Vec<serde_json::Value>>, StatusCode> {
-    let keys: Vec<ProjectKey> =
-        sqlx::query_as("SELECT * FROM project_keys WHERE project_id = ? ORDER BY created_at DESC")
-            .bind(project_id)
-            .fetch_all(state.db.reader())
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    // Enrich with DSN
-    let (scheme, host) = if let Some(ref url) = state.config.public_url {
-        if let Ok(parsed) = url::Url::parse(url) {
-            let s = parsed.scheme().to_string();
-            let h = match parsed.port() {
-                Some(p) => format!("{}:{}", parsed.host_str().unwrap_or("localhost"), p),
-                None => parsed.host_str().unwrap_or("localhost").to_string(),
-            };
-            (s, h)
-        } else {
-            ("http".to_string(), state.config.bind_address.clone())
-        }
-    } else {
-        ("http".to_string(), state.config.bind_address.clone())
-    };
-    let enriched: Vec<serde_json::Value> = keys
-        .iter()
-        .map(|k| {
-            let dsn = build_dsn(&scheme, &host, &k.public_key, k.project_id);
-            serde_json::json!({
-                "id": k.id,
-                "project_id": k.project_id,
-                "public_key": k.public_key,
-                "label": k.label,
-                "is_active": k.is_active,
-                "dsn": dsn,
-                "created_at": k.created_at,
-            })
-        })
-        .collect();
-
-    Ok(Json(enriched))
+) -> Result<Json<Vec<ProjectKey>>, StatusCode> {
+    sqlx::query_as("SELECT * FROM project_keys WHERE project_id = ? ORDER BY created_at DESC")
+        .bind(project_id)
+        .fetch_all(state.db.reader())
+        .await
+        .map(Json)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 async fn create_key(
