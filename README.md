@@ -4,6 +4,35 @@ A lightweight, self-hosted error tracking system compatible with Sentry SDKs.
 
 Bugs receives, processes, and visualizes application errors with source map support, release management, and alerting — all backed by SQLite in a single binary.
 
+## Comparison
+
+Resource usage of Docker images, measured idle after startup.
+
+| | Bugs | [Rustrak](https://github.com/AbianS/rustrak) | [Bugsink](https://github.com/bugsink/bugsink) | [GlitchTip](https://gitlab.com/glitchtip/glitchtip-backend) |
+|---|---|---|---|---|
+| **Language** | Rust | Rust + Node.js | Python | Python |
+| **Database** | SQLite (embedded) | SQLite or PostgreSQL | SQLite or PostgreSQL | PostgreSQL (required) |
+| **Docker image size** | 40 MB | 443 MB | 649 MB | 1.05 GB |
+| **Idle RAM** | ~3 MB | ~68 MB | ~285 MB | ~145 MB |
+| **Total RAM (with deps)** | ~3 MB | ~100 MB | ~285 MB | ~190 MB |
+| **Containers needed** | 1 | 3 | 1 | 2+ |
+
+### Features
+
+| | Bugs | Rustrak | Bugsink | GlitchTip |
+|---|---|---|---|---|
+| **Sentry SDK compatible** | ✓ | ✓ | ✓ | ✓ |
+| **Source maps** | ✓ | ✗ | ✓ | ✓ |
+| **Releases & deploys** | ✓ | ✗ | ✓ | ✓ |
+| **Performance monitoring** | ✓ | ✗ | ✗ | ✓ |
+| **Alerts** | ✓ | ✓ | ✓ | ✓ |
+| **User feedback** | ✓ | ✗ | ✓ | ✓ |
+| **Full-text search** | ✓ | ✗ | ✓ | ✓ |
+| **Environments** | ✓ | ✓ | ✓ | ✓ |
+| **Multi-user / teams** | ✗ | ✗ | ✓ | ✓ |
+| **Uptime monitoring** | ✗ | ✗ | ✗ | ✓ |
+| **Retention policies** | ✓ | ✗ | ✓ | ✓ |
+
 ## Quick start
 
 ### Docker
@@ -34,7 +63,7 @@ The UI is available at `http://localhost:9000`.
 
 Configuration is loaded from (highest precedence first):
 
-1. Environment variables prefixed with `BUGS_` (nested keys split by `_`)
+1. Environment variables prefixed with `BUGS_` (nested keys split by `__`)
 2. A `bugs.toml` file in the working directory
 3. Built-in defaults
 
