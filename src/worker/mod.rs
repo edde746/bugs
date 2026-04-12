@@ -3,6 +3,7 @@ pub mod fingerprint;
 pub mod indexer;
 pub mod normalizer;
 pub mod processor;
+pub mod releases;
 pub mod symbolication;
 
 use std::sync::Arc;

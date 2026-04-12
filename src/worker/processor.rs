@@ -308,7 +308,17 @@ async fn process_inner(
 
         let event_row_id = event_row.0;
 
-        // 11. Index tags and update stats
+        // 11. Auto-create release record if event has a release string
+        if let Some(ref release_str) = release {
+            if let Err(e) = super::releases::ensure_release(db, project_id, release_str).await {
+                warn!(
+                    envelope_id,
+                    "Failed to auto-create release (non-fatal): {e}"
+                );
+            }
+        }
+
+        // Index tags and update stats
         indexer::index_event(
             db,
             config,
@@ -463,6 +473,16 @@ async fn process_inner(
             .bind(&data)
             .execute(db.writer())
             .await?;
+
+            // Auto-create release record if transaction has a release string
+            if let Some(ref release_str) = release {
+                if let Err(e) = super::releases::ensure_release(db, project_id, release_str).await {
+                    warn!(
+                        envelope_id,
+                        "Failed to auto-create release for transaction (non-fatal): {e}"
+                    );
+                }
+            }
 
             processed_any = true;
         }
