@@ -410,13 +410,13 @@ export default function IssueDetail() {
               </div>
               <div class="stat-card">
                 <div class="stat-card__label">First Seen</div>
-                <div class="stat-card__value stat-card__value--sm">
+                <div class="stat-card__value">
                   {relativeTime(issue().first_seen)}
                 </div>
               </div>
               <div class="stat-card">
                 <div class="stat-card__label">Last Seen</div>
-                <div class="stat-card__value stat-card__value--sm">
+                <div class="stat-card__value">
                   {relativeTime(issue().last_seen)}
                 </div>
               </div>

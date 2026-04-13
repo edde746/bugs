@@ -524,10 +524,7 @@ pre, code {
   color: var(--color-text-primary);
 }
 
-.stat-card__value--sm {
-  font-size: 13px;
-  font-weight: 500;
-}
+
 
 /* ===================================================================
    DATA TABLE
