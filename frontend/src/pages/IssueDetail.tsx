@@ -3,7 +3,7 @@ import { createQuery, createMutation, useQueryClient } from "@tanstack/solid-que
 import { createSignal, Show, For } from "solid-js";
 import { api } from "~/api/client";
 import { queryKeys } from "~/queries/keys";
-import type { Issue, UpdateIssueInput, EventListResponse, IssueComment, IssueActivity } from "~/lib/sentry-types";
+import type { Issue, Event as SentryEvent, UpdateIssueInput, EventListResponse, IssueComment, IssueActivity } from "~/lib/sentry-types";
 import { relativeTime, formatNumber } from "~/lib/formatters";
 import { STATUS_LABELS } from "~/lib/constants";
 import Badge from "~/components/ui/Badge";
@@ -19,6 +19,7 @@ import IconArrowRight from "~icons/lucide/arrow-right";
 import IconEye from "~icons/lucide/eye";
 import IconEyeOff from "~icons/lucide/eye-off";
 import { getFrameName, getFrameLocation } from "~/components/events/StacktraceViewer";
+import { formatMechanismDetails } from "~/components/events/ExceptionDisplay";
 import type { ExceptionValue } from "~/components/events/ExceptionDisplay";
 import type { Breadcrumb } from "~/components/events/BreadcrumbsTimeline";
 
@@ -55,15 +56,23 @@ export default function IssueDetail() {
     enabled: !!issueQuery.data,
   }));
 
-  const currentEvent = () => {
+  const currentEventSummary = () => {
     const events = eventsQuery.data?.events;
     if (!events || events.length === 0) return null;
     const idx = Math.min(eventIndex(), events.length - 1);
     return events[idx];
   };
 
+  const eventDetailQuery = createQuery(() => ({
+    queryKey: queryKeys.events.detail(String(currentEventSummary()?.id ?? "none")),
+    queryFn: () => api.get<SentryEvent>(`/internal/events/${currentEventSummary()!.id}`),
+    enabled: !!currentEventSummary(),
+  }));
+
+  const currentEvent = () => eventDetailQuery.data ?? currentEventSummary();
+
   const parsedData = () => {
-    const event = currentEvent();
+    const event = eventDetailQuery.data;
     if (!event) return null;
     try {
       return JSON.parse(event.data);
@@ -209,9 +218,8 @@ export default function IssueDetail() {
       if (exc.mechanism) {
         const handled = exc.mechanism.handled === false ? " (unhandled)" : "";
         let mechLine = `- **Mechanism:** ${exc.mechanism.type ?? "generic"}${handled}`;
-        if (exc.mechanism.data && Object.keys(exc.mechanism.data).length > 0) {
-          mechLine += ` — ${Object.entries(exc.mechanism.data).map(([k, v]) => `${k}: ${v}`).join(", ")}`;
-        }
+        const details = formatMechanismDetails(exc.mechanism);
+        if (details) mechLine += ` — ${details}`;
         parts.push("");
         parts.push(mechLine);
       }

@@ -11,10 +11,32 @@ export interface ExceptionValue {
     handled?: boolean;
     description?: string;
     data?: Record<string, unknown>;
+    meta?: Record<string, unknown>;
   };
   stacktrace?: {
     frames?: StackFrame[];
   };
+}
+
+export function formatMechanismDetails(mechanism: NonNullable<ExceptionValue["mechanism"]>): string {
+  const parts: string[] = [];
+  if (mechanism.data) {
+    for (const [k, v] of Object.entries(mechanism.data)) {
+      if (v != null) parts.push(`${k}: ${v}`);
+    }
+  }
+  if (mechanism.meta) {
+    for (const [k, v] of Object.entries(mechanism.meta)) {
+      if (v && typeof v === "object") {
+        const inner = Object.entries(v as Record<string, unknown>)
+          .filter(([, val]) => val != null)
+          .map(([ik, iv]) => `${ik}: ${iv}`)
+          .join(", ");
+        if (inner) parts.push(`${k}(${inner})`);
+      }
+    }
+  }
+  return parts.join(", ");
 }
 
 interface ExceptionDisplayProps {
@@ -40,12 +62,10 @@ export default function ExceptionDisplay(props: ExceptionDisplayProps) {
                   {exception.mechanism!.handled === false && (
                     <span class="exception__unhandled">(unhandled)</span>
                   )}
-                  <Show when={exception.mechanism!.data}>
-                    {" — "}
-                    {Object.entries(exception.mechanism!.data!)
-                      .map(([k, v]) => `${k}: ${v}`)
-                      .join(", ")}
-                  </Show>
+                  {(() => {
+                    const details = formatMechanismDetails(exception.mechanism!);
+                    return details ? ` — ${details}` : "";
+                  })()}
                 </p>
               </Show>
             </div>
