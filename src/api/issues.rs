@@ -4,7 +4,7 @@ use axum::{
     Json, Router,
     extract::{Path, Query, State},
     http::StatusCode,
-    routing::get,
+    routing::{get, put},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Deserialize;
@@ -15,6 +15,11 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/api/internal/projects/{slug}/issues/filters",
             get(list_issue_filters),
+        )
+        .route("/api/internal/issues/bulk", put(bulk_update_issues))
+        .route(
+            "/api/internal/issues/bulk/delete",
+            axum::routing::post(bulk_delete_issues),
         )
         .route(
             "/api/internal/issues/{id}",
@@ -308,6 +313,100 @@ async fn update_issue(
     }
 
     get_issue(State(state), Path(id)).await
+}
+
+async fn bulk_update_issues(
+    State(state): State<AppState>,
+    Json(input): Json<BulkUpdateIssues>,
+) -> StatusCode {
+    if input.ids.is_empty() || input.ids.len() > 100 {
+        return StatusCode::BAD_REQUEST;
+    }
+
+    let status = match input.update.status.as_deref() {
+        Some(s @ ("resolved" | "ignored" | "unresolved")) => s,
+        _ => return StatusCode::BAD_REQUEST,
+    };
+
+    let placeholders = vec!["?"; input.ids.len()].join(",");
+
+    let update_sql = match status {
+        "ignored" => format!(
+            "UPDATE issues SET status = 'ignored', snooze_until = ?, snooze_event_count = ?, \
+             resolved_in_release = NULL WHERE id IN ({})",
+            placeholders
+        ),
+        "resolved" => format!(
+            "UPDATE issues SET status = 'resolved', snooze_until = NULL, snooze_event_count = NULL, \
+             resolved_in_release = ? WHERE id IN ({})",
+            placeholders
+        ),
+        _ => format!(
+            "UPDATE issues SET status = 'unresolved', snooze_until = NULL, snooze_event_count = NULL, \
+             resolved_in_release = NULL WHERE id IN ({})",
+            placeholders
+        ),
+    };
+
+    let mut query = sqlx::query(&update_sql);
+    if status == "ignored" {
+        query = query
+            .bind(&input.update.snooze_until)
+            .bind(input.update.snooze_event_count);
+    } else if status == "resolved" {
+        query = query.bind(&input.update.resolved_in_release);
+    }
+    for id in &input.ids {
+        query = query.bind(id);
+    }
+
+    if query.execute(state.db.writer()).await.is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+
+    let activity_data = if status == "resolved" {
+        input
+            .update
+            .resolved_in_release
+            .as_ref()
+            .map(|r| serde_json::json!({ "release": r }).to_string())
+    } else {
+        None
+    };
+
+    let values = vec!["(?, ?, ?)"; input.ids.len()].join(",");
+    let activity_sql = format!(
+        "INSERT INTO issue_activity (issue_id, kind, data) VALUES {}",
+        values
+    );
+    let mut activity_query = sqlx::query(&activity_sql);
+    for id in &input.ids {
+        activity_query = activity_query.bind(id).bind(status).bind(&activity_data);
+    }
+    activity_query.execute(state.db.writer()).await.ok();
+
+    StatusCode::NO_CONTENT
+}
+
+async fn bulk_delete_issues(
+    State(state): State<AppState>,
+    Json(input): Json<BulkDeleteIssues>,
+) -> StatusCode {
+    if input.ids.is_empty() || input.ids.len() > 100 {
+        return StatusCode::BAD_REQUEST;
+    }
+
+    let placeholders = vec!["?"; input.ids.len()].join(",");
+    let sql = format!("DELETE FROM issues WHERE id IN ({})", placeholders);
+    let mut query = sqlx::query(&sql);
+    for id in &input.ids {
+        query = query.bind(id);
+    }
+
+    match query.execute(state.db.writer()).await {
+        Ok(_) => StatusCode::NO_CONTENT,
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
 }
 
 async fn delete_issue(State(state): State<AppState>, Path(id): Path<i64>) -> StatusCode {

@@ -1,9 +1,9 @@
 import { A, useParams, useSearchParams } from "@solidjs/router";
-import { createQuery } from "@tanstack/solid-query";
+import { createQuery, createMutation, useQueryClient } from "@tanstack/solid-query";
 import { createSignal, For, Show } from "solid-js";
 import { api } from "~/api/client";
 import { queryKeys } from "~/queries/keys";
-import type { IssueListResponse, IssueFilterOptions } from "~/lib/sentry-types";
+import type { IssueListResponse, IssueFilterOptions, BulkUpdateIssuesInput, BulkDeleteIssuesInput } from "~/lib/sentry-types";
 import { formatNumber } from "~/lib/formatters";
 import { STATUS_LABELS } from "~/lib/constants";
 import Badge from "~/components/ui/Badge";
@@ -23,6 +23,7 @@ const SORT_OPTIONS = [
 
 export default function ProjectIssues() {
   const params = useParams<{ project: string }>();
+  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams<{
     status?: string;
     sort?: string;
@@ -94,6 +95,39 @@ export default function ProjectIssues() {
     setSelectedIssues(current);
   };
 
+  const clearSelection = () => setSelectedIssues(new Set<number>());
+
+  const onBulkSuccess = () => {
+    clearSelection();
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.issues.list(params.project, {}),
+      exact: false,
+    });
+  };
+
+  const bulkUpdateMutation = createMutation(() => ({
+    mutationFn: (input: BulkUpdateIssuesInput) =>
+      api.put<void>("/internal/issues/bulk", input),
+    onSuccess: onBulkSuccess,
+  }));
+
+  const bulkDeleteMutation = createMutation(() => ({
+    mutationFn: (input: BulkDeleteIssuesInput) =>
+      api.post<void>("/internal/issues/bulk/delete", input),
+    onSuccess: onBulkSuccess,
+  }));
+
+  const isBulkPending = () =>
+    bulkUpdateMutation.isPending || bulkDeleteMutation.isPending;
+
+  const handleBulkStatus = (newStatus: string) => {
+    bulkUpdateMutation.mutate({ ids: [...selectedIssues()], status: newStatus });
+  };
+
+  const handleBulkDelete = () => {
+    bulkDeleteMutation.mutate({ ids: [...selectedIssues()] });
+  };
+
   const hasPrev = () => !!cursor();
   const hasNext = () => !!issuesQuery.data?.nextCursor;
 
@@ -110,7 +144,10 @@ export default function ProjectIssues() {
               <button
                 class="tab"
                 data-active={status() === s}
-                onClick={() => setSearchParams({ status: s, cursor: undefined })}
+                onClick={() => {
+                  clearSelection();
+                  setSearchParams({ status: s, cursor: undefined });
+                }}
               >
                 {STATUS_LABELS[s] ?? s}
               </button>
@@ -190,6 +227,59 @@ export default function ProjectIssues() {
                 {(l) => <option value={l}>{l}</option>}
               </For>
             </select>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={selectedIssues().size > 0}>
+        <div class="bulk-action-bar">
+          <span class="text-secondary">{selectedIssues().size} selected</span>
+          <div class="inline-gap">
+            <Show when={status() !== "resolved"}>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={isBulkPending()}
+                onClick={() => handleBulkStatus("resolved")}
+              >
+                Resolve
+              </Button>
+            </Show>
+            <Show when={status() !== "ignored"}>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={isBulkPending()}
+                onClick={() => handleBulkStatus("ignored")}
+              >
+                Ignore
+              </Button>
+            </Show>
+            <Show when={status() !== "unresolved"}>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={isBulkPending()}
+                onClick={() => handleBulkStatus("unresolved")}
+              >
+                Unresolve
+              </Button>
+            </Show>
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={isBulkPending()}
+              onClick={handleBulkDelete}
+            >
+              Delete
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearSelection}
+            >
+              Clear
+            </Button>
           </div>
         </div>
       </Show>

@@ -119,6 +119,14 @@ export interface UpdateIssueInput {
   snoozeEventCount?: number;
 }
 
+export interface BulkUpdateIssuesInput extends UpdateIssueInput {
+  ids: number[];
+}
+
+export interface BulkDeleteIssuesInput {
+  ids: number[];
+}
+
 export interface IssueComment {
   id: number;
   issue_id: number;

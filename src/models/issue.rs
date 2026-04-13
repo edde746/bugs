@@ -31,3 +31,15 @@ pub struct UpdateIssue {
     #[serde(default, rename = "resolvedInRelease")]
     pub resolved_in_release: Option<String>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct BulkUpdateIssues {
+    pub ids: Vec<i64>,
+    #[serde(flatten)]
+    pub update: UpdateIssue,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BulkDeleteIssues {
+    pub ids: Vec<i64>,
+}
