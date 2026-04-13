@@ -51,6 +51,9 @@ export default function BreadcrumbsTimeline(props: BreadcrumbsTimelineProps) {
                         {crumb.category}
                       </span>
                     </Show>
+                    <Show when={crumb.type}>
+                      <span class="breadcrumb__type">{crumb.type}</span>
+                    </Show>
                     <span class="breadcrumb__time">
                       {formatBreadcrumbTime(crumb.timestamp)}
                     </span>

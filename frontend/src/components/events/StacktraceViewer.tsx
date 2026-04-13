@@ -18,6 +18,16 @@ export interface StackFrame {
   symbol_addr?: string;
   image_addr?: string;
   package?: string;
+  native?: boolean;
+  platform?: string;
+  lock?: {
+    address: string;
+    class_name: string;
+    package_name: string;
+    type: number;
+  };
+  addr_mode?: string;
+  trust?: string;
 }
 
 export function getFrameName(frame: StackFrame): string {
@@ -92,6 +102,22 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
             const frameName = () => getFrameName(frame);
             const frameLocation = () => getFrameLocation(frame);
 
+            const frameTags = () => (
+              <>
+                <Show when={frame.in_app}>
+                  <span class="stacktrace__app-tag">app</span>
+                </Show>
+                <Show when={frame.native}>
+                  <span class="stacktrace__native-tag">native</span>
+                </Show>
+                <Show when={frame.lock}>
+                  <span class="stacktrace__lock-tag" title={`${frame.lock!.package_name}.${frame.lock!.class_name} @ ${frame.lock!.address}`}>
+                    lock
+                  </span>
+                </Show>
+              </>
+            );
+
             return (
               <div class="stacktrace__frame" data-in-app={frame.in_app ?? false}>
                 <Show when={hasContext()} fallback={
@@ -102,9 +128,7 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
                     <span class="stacktrace__file-name">
                       {frameLocation()}
                     </span>
-                    <Show when={frame.in_app}>
-                      <span class="stacktrace__app-tag">app</span>
-                    </Show>
+                    {frameTags()}
                   </div>
                 }>
                   <button
@@ -120,9 +144,7 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
                     <span class="stacktrace__file-name">
                       {frameLocation()}
                     </span>
-                    <Show when={frame.in_app}>
-                      <span class="stacktrace__app-tag">app</span>
-                    </Show>
+                    {frameTags()}
                   </button>
                 </Show>
                 <Show when={isExpanded() && hasContext()}>

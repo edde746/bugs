@@ -1,4 +1,5 @@
 import { createSignal, For, Show } from "solid-js";
+import { displayValue } from "~/lib/formatters";
 
 interface ContextPanelsProps {
   contexts?: Record<string, Record<string, unknown>>;
@@ -101,9 +102,7 @@ export default function ContextPanels(props: ContextPanelsProps) {
                         {key}
                       </td>
                       <td style={{ "word-break": "break-all" }}>
-                        {typeof value === "object"
-                          ? JSON.stringify(value)
-                          : String(value ?? "")}
+                        {displayValue(value)}
                       </td>
                     </tr>
                   )}

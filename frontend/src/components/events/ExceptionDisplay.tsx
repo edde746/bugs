@@ -6,6 +6,7 @@ export interface ExceptionValue {
   type?: string;
   value?: string;
   module?: string;
+  thread_id?: number;
   mechanism?: {
     type?: string;
     handled?: boolean;
@@ -15,6 +16,7 @@ export interface ExceptionValue {
   };
   stacktrace?: {
     frames?: StackFrame[];
+    snapshot?: boolean;
   };
 }
 
@@ -52,7 +54,13 @@ export default function ExceptionDisplay(props: ExceptionDisplayProps) {
             <div>
               <span class="exception__type">
                 {exception.type ?? "Error"}
+                <Show when={exception.module}>
+                  <span class="exception__module"> ({exception.module})</span>
+                </Show>
               </span>
+              <Show when={exception.thread_id != null}>
+                <span class="exception__thread-id">Thread #{exception.thread_id}</span>
+              </Show>
               <Show when={exception.value}>
                 <p class="exception__value">{exception.value}</p>
               </Show>

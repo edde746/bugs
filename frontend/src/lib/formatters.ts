@@ -34,3 +34,8 @@ export function slugify(text: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 }
+
+export function displayValue(value: unknown): string {
+  if (value == null) return "";
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
+}

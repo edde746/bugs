@@ -1,16 +1,17 @@
 import { A, useParams } from "@solidjs/router";
 import { createQuery, createMutation, useQueryClient } from "@tanstack/solid-query";
-import { createSignal, Show, For } from "solid-js";
+import { createSignal, createMemo, Show, For } from "solid-js";
 import { api } from "~/api/client";
 import { queryKeys } from "~/queries/keys";
 import type { Issue, Event as SentryEvent, UpdateIssueInput, EventListResponse, IssueComment, IssueActivity } from "~/lib/sentry-types";
-import { relativeTime, formatNumber } from "~/lib/formatters";
+import { relativeTime, formatNumber, displayValue } from "~/lib/formatters";
 import { STATUS_LABELS } from "~/lib/constants";
 import Badge from "~/components/ui/Badge";
 import Button from "~/components/ui/Button";
 import LoadingSpinner from "~/components/ui/LoadingSpinner";
 import ExceptionDisplay from "~/components/events/ExceptionDisplay";
 import BreadcrumbsTimeline from "~/components/events/BreadcrumbsTimeline";
+import ThreadsDisplay from "~/components/events/ThreadsDisplay";
 import ContextPanels from "~/components/events/ContextPanels";
 import TagsTable from "~/components/events/TagsTable";
 import CopyButton from "~/components/ui/CopyButton";
@@ -22,6 +23,7 @@ import { getFrameName, getFrameLocation } from "~/components/events/StacktraceVi
 import { formatMechanismDetails } from "~/components/events/ExceptionDisplay";
 import type { ExceptionValue } from "~/components/events/ExceptionDisplay";
 import type { Breadcrumb } from "~/components/events/BreadcrumbsTimeline";
+import type { ThreadValue } from "~/components/events/ThreadsDisplay";
 
 const ACTIVITY_LABELS: Record<string, string> = {
   first_seen: "Issue first seen",
@@ -71,7 +73,7 @@ export default function IssueDetail() {
 
   const currentEvent = () => eventDetailQuery.data ?? currentEventSummary();
 
-  const parsedData = () => {
+  const parsedData = createMemo(() => {
     const event = eventDetailQuery.data;
     if (!event) return null;
     try {
@@ -79,7 +81,7 @@ export default function IssueDetail() {
     } catch {
       return null;
     }
-  };
+  });
 
   const exceptions = () => {
     const data = parsedData();
@@ -120,6 +122,35 @@ export default function IssueDetail() {
       key,
       value: String(value),
     }));
+  };
+
+  const threads = () => {
+    const data = parsedData();
+    if (!data?.threads?.values) return [];
+    return data.threads.values as ThreadValue[];
+  };
+
+  const sdk = () => {
+    const data = parsedData();
+    return (data?.sdk ?? null) as { name?: string; version?: string; integrations?: string[]; packages?: Array<{ name: string; version: string }> } | null;
+  };
+
+  const fingerprint = () => {
+    const data = parsedData();
+    return (data?.fingerprint as string[] | null) ?? [];
+  };
+
+  const extra = () => {
+    const data = parsedData();
+    return (data?.extra ?? null) as Record<string, unknown> | null;
+  };
+
+  const eventMessage = () => {
+    const data = parsedData();
+    if (data?.message) return String(data.message);
+    if (data?.logentry?.formatted) return String(data.logentry.formatted);
+    if (data?.logentry?.message) return String(data.logentry.message);
+    return null;
   };
 
   const updateMutation = createMutation(() => ({
@@ -197,6 +228,7 @@ export default function IssueDetail() {
 
     // Event metadata
     const ev = currentEvent();
+    const data = parsedData();
     if (ev) {
       parts.push("");
       parts.push("## Event");
@@ -204,13 +236,29 @@ export default function IssueDetail() {
       parts.push(`- **Event ID:** ${ev.event_id}`);
       parts.push(`- **Timestamp:** ${ev.timestamp}`);
       if (ev.platform) parts.push(`- **Platform:** ${ev.platform}`);
+      if (ev.release) parts.push(`- **Release:** ${ev.release}`);
+      if (ev.environment) parts.push(`- **Environment:** ${ev.environment}`);
+      if (data?.dist) parts.push(`- **Dist:** ${data.dist}`);
+      if (data?.server_name) parts.push(`- **Server:** ${data.server_name}`);
+      if (data?.logger) parts.push(`- **Logger:** ${data.logger}`);
+    }
+
+    // Message (when no exceptions)
+    const msg = eventMessage();
+    const excs = exceptions() as ExceptionValue[];
+    if (msg && excs.length === 0) {
+      parts.push("");
+      parts.push("## Message");
+      parts.push("");
+      parts.push(msg);
     }
 
     // Exceptions + stack traces
-    const excs = exceptions() as ExceptionValue[];
     for (const exc of excs) {
       parts.push("");
-      parts.push(`## Exception: ${exc.type ?? "Error"}`);
+      const excModule = exc.module ? ` (${exc.module})` : "";
+      const excThread = exc.thread_id != null ? ` [Thread #${exc.thread_id}]` : "";
+      parts.push(`## Exception: ${exc.type ?? "Error"}${excModule}${excThread}`);
       if (exc.value) {
         parts.push("");
         parts.push(exc.value);
@@ -232,24 +280,33 @@ export default function IssueDetail() {
         parts.push("|---|---|---|");
         const reversed = [...frames].reverse();
         for (const frame of reversed) {
-          const tag = frame.in_app ? "app" : "";
-          parts.push(`| ${tag} | ${getFrameName(frame)} | ${getFrameLocation(frame)} |`);
+          const frameTags = [frame.in_app ? "app" : "", frame.native ? "native" : ""].filter(Boolean).join(" ");
+          parts.push(`| ${frameTags} | ${getFrameName(frame)} | ${getFrameLocation(frame)} |`);
         }
       }
     }
 
     // Threads
-    const data = parsedData();
-    const threadValues = data?.threads?.values as Array<{ id?: unknown; name?: string; crashed?: boolean; current?: boolean; stacktrace?: { frames?: Array<Record<string, unknown>> } }> | undefined;
-    if (threadValues && threadValues.length > 0) {
+    const threadValues = threads();
+    if (threadValues.length > 0) {
       parts.push("");
       parts.push("## Threads");
       for (const thread of threadValues) {
         const label = thread.id != null ? `Thread #${thread.id}` : "Thread";
         const name = thread.name ? ` — ${thread.name}` : "";
-        const tags = [thread.crashed ? "crashed" : "", thread.current ? "current" : ""].filter(Boolean).join(", ");
+        const threadTags = [
+          thread.crashed ? "crashed" : "",
+          thread.current ? "current" : "",
+          thread.main ? "main" : "",
+          thread.state ?? "",
+        ].filter(Boolean).join(", ");
         parts.push("");
-        parts.push(`### ${label}${name}${tags ? ` (${tags})` : ""}`);
+        parts.push(`### ${label}${name}${threadTags ? ` (${threadTags})` : ""}`);
+        if (thread.held_locks && Object.keys(thread.held_locks).length > 0) {
+          for (const lock of Object.values(thread.held_locks)) {
+            parts.push(`- holds lock: ${lock.package_name}.${lock.class_name} @ ${lock.address}`);
+          }
+        }
         const frames = thread.stacktrace?.frames;
         if (frames && frames.length > 0) {
           parts.push("");
@@ -257,8 +314,8 @@ export default function IssueDetail() {
           parts.push("|---|---|---|");
           const reversed = [...frames].reverse();
           for (const frame of reversed) {
-            const tag = frame.in_app ? "app" : "";
-            parts.push(`| ${tag} | ${getFrameName(frame as any)} | ${getFrameLocation(frame as any)} |`);
+            const frameTags = [frame.in_app ? "app" : "", frame.native ? "native" : ""].filter(Boolean).join(" ");
+            parts.push(`| ${frameTags} | ${getFrameName(frame)} | ${getFrameLocation(frame)} |`);
           }
         }
       }
@@ -275,14 +332,15 @@ export default function IssueDetail() {
       parts.push("");
       parts.push("## Breadcrumbs");
       parts.push("");
-      parts.push("| Time | Category | Level | Message |");
-      parts.push("|---|---|---|---|");
+      parts.push("| Time | Type | Category | Level | Message |");
+      parts.push("|---|---|---|---|---|");
       for (const crumb of sorted) {
         const ts = crumb.timestamp != null ? String(crumb.timestamp) : "";
+        const type = crumb.type ?? "";
         const cat = crumb.category ?? "";
         const lvl = crumb.level ?? "info";
-        const msg = crumb.message ?? "";
-        parts.push(`| ${ts} | ${cat} | ${lvl} | ${msg} |`);
+        const crumbMsg = crumb.message ?? "";
+        parts.push(`| ${ts} | ${type} | ${cat} | ${lvl} | ${crumbMsg} |`);
         if (crumb.data && Object.keys(crumb.data).length > 0) {
           parts.push("");
           parts.push("```json");
@@ -315,7 +373,7 @@ export default function IssueDetail() {
       parts.push("| Key | Value |");
       parts.push("|---|---|");
       for (const [key, value] of Object.entries(u)) {
-        parts.push(`| ${key} | ${typeof value === "object" ? JSON.stringify(value) : String(value ?? "")} |`);
+        parts.push(`| ${key} | ${displayValue(value)} |`);
       }
     }
 
@@ -323,8 +381,8 @@ export default function IssueDetail() {
     if (ctx) {
       const order = ["browser", "os", "device", "runtime"];
       const rendered = new Set<string>();
-      const renderContext = (key: string, data: Record<string, unknown>) => {
-        if (rendered.has(key) || Object.keys(data).length === 0) return;
+      const renderContext = (key: string, ctxData: Record<string, unknown>) => {
+        if (rendered.has(key) || Object.keys(ctxData).length === 0) return;
         rendered.add(key);
         const label = key.charAt(0).toUpperCase() + key.slice(1);
         parts.push("");
@@ -332,8 +390,8 @@ export default function IssueDetail() {
         parts.push("");
         parts.push("| Key | Value |");
         parts.push("|---|---|");
-        for (const [k, v] of Object.entries(data)) {
-          parts.push(`| ${k} | ${typeof v === "object" ? JSON.stringify(v) : String(v ?? "")} |`);
+        for (const [k, v] of Object.entries(ctxData)) {
+          parts.push(`| ${k} | ${displayValue(v)} |`);
         }
       };
       for (const key of order) {
@@ -371,6 +429,33 @@ export default function IssueDetail() {
           parts.push(`| ${k} | ${v} |`);
         }
       }
+    }
+
+    // Extra data
+    const ex = extra();
+    if (ex && Object.keys(ex).length > 0) {
+      parts.push("");
+      parts.push("## Extra Data");
+      parts.push("");
+      parts.push("| Key | Value |");
+      parts.push("|---|---|");
+      for (const [key, value] of Object.entries(ex)) {
+        parts.push(`| ${key} | ${displayValue(value)} |`);
+      }
+    }
+
+    // Fingerprint
+    const fp = fingerprint();
+    if (fp.length > 0) {
+      parts.push("");
+      parts.push(`**Fingerprint:** ${fp.map(r => `\`${r}\``).join(", ")}`);
+    }
+
+    // SDK
+    const sdkInfo = sdk();
+    if (sdkInfo) {
+      parts.push("");
+      parts.push(`**SDK:** ${sdkInfo.name ?? "unknown"} ${sdkInfo.version ?? ""}`);
     }
 
     return parts.join("\n");
@@ -506,13 +591,32 @@ export default function IssueDetail() {
                       <Show when={event().release}>
                         <span>Release: {event().release}</span>
                       </Show>
+                      <Show when={parsedData()?.dist}>
+                        <span>Dist: {String(parsedData()!.dist)}</span>
+                      </Show>
                       <Show when={event().transaction_name}>
                         <span>Transaction: {event().transaction_name}</span>
                       </Show>
+                      <Show when={parsedData()?.server_name}>
+                        <span>Server: {String(parsedData()!.server_name)}</span>
+                      </Show>
+                      <Show when={parsedData()?.logger}>
+                        <span>Logger: {String(parsedData()!.logger)}</span>
+                      </Show>
                     </div>
+
+                    <Show when={eventMessage() && exceptions().length === 0}>
+                      <div class="event-message">
+                        <p class="event-message__text">{eventMessage()}</p>
+                      </div>
+                    </Show>
 
                     <Show when={exceptions().length > 0}>
                       <ExceptionDisplay exceptions={exceptions()} />
+                    </Show>
+
+                    <Show when={threads().length > 0}>
+                      <ThreadsDisplay threads={threads()} />
                     </Show>
 
                     <Show when={breadcrumbs().length > 0}>
@@ -528,6 +632,74 @@ export default function IssueDetail() {
                       request={request()}
                       user={user()}
                     />
+
+                    <Show when={extra() && Object.keys(extra()!).length > 0}>
+                      <div class="card">
+                        <div class="card__header">
+                          <h3>Extra Data</h3>
+                        </div>
+                        <table class="data-table data-table--compact data-table--striped">
+                          <thead>
+                            <tr>
+                              <th>Key</th>
+                              <th>Value</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <For each={Object.entries(extra()!)}>
+                              {([key, value]) => (
+                                <tr>
+                                  <td class="text-secondary" style={{ "font-family": "var(--font-sans)", "font-weight": "500" }}>{key}</td>
+                                  <td style={{ "word-break": "break-all" }}>
+                                    {displayValue(value)}
+                                  </td>
+                                </tr>
+                              )}
+                            </For>
+                          </tbody>
+                        </table>
+                      </div>
+                    </Show>
+
+                    <Show when={fingerprint().length > 0}>
+                      <div class="fingerprint">
+                        <span class="fingerprint__label">Fingerprint:</span>
+                        <For each={fingerprint()}>
+                          {(rule) => <span class="fingerprint__rule">{rule}</span>}
+                        </For>
+                      </div>
+                    </Show>
+
+                    <Show when={sdk()}>
+                      {(sdkInfo) => (
+                        <div class="sdk-info">
+                          <div class="sdk-info__header">
+                            <span class="sdk-info__title">SDK</span>
+                            <span class="sdk-info__version">{sdkInfo().name} {sdkInfo().version}</span>
+                          </div>
+                          <Show when={sdkInfo().packages && sdkInfo().packages!.length > 0}>
+                            <details class="sdk-info__details">
+                              <summary>Packages ({sdkInfo().packages!.length})</summary>
+                              <div class="sdk-info__list">
+                                <For each={sdkInfo().packages!}>
+                                  {(pkg) => <span class="sdk-info__item">{pkg.name}@{pkg.version}</span>}
+                                </For>
+                              </div>
+                            </details>
+                          </Show>
+                          <Show when={sdkInfo().integrations && sdkInfo().integrations!.length > 0}>
+                            <details class="sdk-info__details">
+                              <summary>Integrations ({sdkInfo().integrations!.length})</summary>
+                              <div class="sdk-info__list">
+                                <For each={sdkInfo().integrations!}>
+                                  {(name) => <span class="sdk-info__item">{name}</span>}
+                                </For>
+                              </div>
+                            </details>
+                          </Show>
+                        </div>
+                      )}
+                    </Show>
 
                     <div class="raw-json">
                       <button
