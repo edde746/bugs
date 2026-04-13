@@ -10,6 +10,7 @@ export interface ExceptionValue {
     type?: string;
     handled?: boolean;
     description?: string;
+    data?: Record<string, unknown>;
   };
   stacktrace?: {
     frames?: StackFrame[];
@@ -39,6 +40,12 @@ export default function ExceptionDisplay(props: ExceptionDisplayProps) {
                   {exception.mechanism!.handled === false && (
                     <span class="exception__unhandled">(unhandled)</span>
                   )}
+                  <Show when={exception.mechanism!.data}>
+                    {" — "}
+                    {Object.entries(exception.mechanism!.data!)
+                      .map(([k, v]) => `${k}: ${v}`)
+                      .join(", ")}
+                  </Show>
                 </p>
               </Show>
             </div>

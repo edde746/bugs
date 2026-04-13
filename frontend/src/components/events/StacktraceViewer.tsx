@@ -14,6 +14,26 @@ export interface StackFrame {
   pre_context?: string[];
   context_line?: string;
   post_context?: string[];
+  instruction_addr?: string;
+  symbol_addr?: string;
+  image_addr?: string;
+  package?: string;
+}
+
+export function getFrameName(frame: StackFrame): string {
+  return frame.function ?? frame.instruction_addr ?? "<anonymous>";
+}
+
+export function getFrameLocation(frame: StackFrame): string {
+  if (frame.filename || frame.abs_path || frame.module) {
+    let loc = frame.filename ?? frame.abs_path ?? frame.module ?? "";
+    if (frame.lineno != null) {
+      loc += `:${frame.lineno}`;
+      if (frame.colno != null) loc += `:${frame.colno}`;
+    }
+    return loc;
+  }
+  return frame.package ?? "unknown";
 }
 
 interface StacktraceViewerProps {
@@ -69,20 +89,18 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
               !!frame.context_line ||
               (frame.pre_context && frame.pre_context.length > 0) ||
               (frame.post_context && frame.post_context.length > 0);
+            const frameName = () => getFrameName(frame);
+            const frameLocation = () => getFrameLocation(frame);
 
             return (
               <div class="stacktrace__frame" data-in-app={frame.in_app ?? false}>
                 <Show when={hasContext()} fallback={
                   <div class="stacktrace__frame-btn stacktrace__frame-btn--static">
                     <span class="stacktrace__fn-name">
-                      {frame.function ?? "<anonymous>"}
+                      {frameName()}
                     </span>
                     <span class="stacktrace__file-name">
-                      {frame.filename ?? frame.abs_path ?? frame.module ?? "unknown"}
-                      <Show when={frame.lineno}>
-                        :{frame.lineno}
-                        <Show when={frame.colno}>:{frame.colno}</Show>
-                      </Show>
+                      {frameLocation()}
                     </span>
                     <Show when={frame.in_app}>
                       <span class="stacktrace__app-tag">app</span>
@@ -97,14 +115,10 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
                       {isExpanded() ? <IconChevronDown /> : <IconChevronRight />}
                     </span>
                     <span class="stacktrace__fn-name">
-                      {frame.function ?? "<anonymous>"}
+                      {frameName()}
                     </span>
                     <span class="stacktrace__file-name">
-                      {frame.filename ?? frame.abs_path ?? frame.module ?? "unknown"}
-                      <Show when={frame.lineno}>
-                        :{frame.lineno}
-                        <Show when={frame.colno}>:{frame.colno}</Show>
-                      </Show>
+                      {frameLocation()}
                     </span>
                     <Show when={frame.in_app}>
                       <span class="stacktrace__app-tag">app</span>

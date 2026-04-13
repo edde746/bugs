@@ -5,7 +5,7 @@ import { useClipboard } from "~/hooks/useClipboard";
 import Button from "~/components/ui/Button";
 
 interface CopyButtonProps {
-  text: string;
+  text: string | (() => string);
   label?: string;
   class?: string;
 }
@@ -18,7 +18,7 @@ export default function CopyButton(props: CopyButtonProps) {
       variant="ghost"
       size="sm"
       class={props.class}
-      onClick={() => copy(props.text)}
+      onClick={() => copy(typeof props.text === "function" ? props.text() : props.text)}
     >
       <Show when={copied()} fallback={<><IconClipboard /> {props.label ?? "Copy"}</>}>
         <IconCheck /> Copied!

@@ -11,6 +11,7 @@ import ExceptionDisplay from "~/components/events/ExceptionDisplay";
 import BreadcrumbsTimeline from "~/components/events/BreadcrumbsTimeline";
 import ContextPanels from "~/components/events/ContextPanels";
 import TagsTable from "~/components/events/TagsTable";
+import ThreadsDisplay from "~/components/events/ThreadsDisplay";
 import IconArrowLeft from "~icons/lucide/arrow-left";
 import IconEye from "~icons/lucide/eye";
 import IconEyeOff from "~icons/lucide/eye-off";
@@ -69,6 +70,11 @@ export default function EventDetail() {
     return data?.user ?? null;
   };
 
+  const threads = () => {
+    const data = parsedData();
+    return data?.threads?.values ?? [];
+  };
+
   const tags = () => {
     const data = parsedData();
     if (!data?.tags) return [];
@@ -117,6 +123,10 @@ export default function EventDetail() {
 
             <Show when={exceptions().length > 0}>
               <ExceptionDisplay exceptions={exceptions()} />
+            </Show>
+
+            <Show when={threads().length > 0}>
+              <ThreadsDisplay threads={threads()} />
             </Show>
 
             <Show when={breadcrumbs().length > 0}>

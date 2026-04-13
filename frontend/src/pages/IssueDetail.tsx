@@ -18,6 +18,7 @@ import IconArrowLeft from "~icons/lucide/arrow-left";
 import IconArrowRight from "~icons/lucide/arrow-right";
 import IconEye from "~icons/lucide/eye";
 import IconEyeOff from "~icons/lucide/eye-off";
+import { getFrameName, getFrameLocation } from "~/components/events/StacktraceViewer";
 import type { ExceptionValue } from "~/components/events/ExceptionDisplay";
 import type { Breadcrumb } from "~/components/events/BreadcrumbsTimeline";
 
@@ -207,8 +208,12 @@ export default function IssueDetail() {
       }
       if (exc.mechanism) {
         const handled = exc.mechanism.handled === false ? " (unhandled)" : "";
+        let mechLine = `- **Mechanism:** ${exc.mechanism.type ?? "generic"}${handled}`;
+        if (exc.mechanism.data && Object.keys(exc.mechanism.data).length > 0) {
+          mechLine += ` — ${Object.entries(exc.mechanism.data).map(([k, v]) => `${k}: ${v}`).join(", ")}`;
+        }
         parts.push("");
-        parts.push(`- **Mechanism:** ${exc.mechanism.type ?? "generic"}${handled}`);
+        parts.push(mechLine);
       }
       const frames = exc.stacktrace?.frames;
       if (frames && frames.length > 0) {
@@ -220,14 +225,33 @@ export default function IssueDetail() {
         const reversed = [...frames].reverse();
         for (const frame of reversed) {
           const tag = frame.in_app ? "app" : "";
-          const fn = frame.function ?? "<anonymous>";
-          const file = frame.filename ?? frame.abs_path ?? frame.module ?? "unknown";
-          let loc = file;
-          if (frame.lineno != null) {
-            loc += `:${frame.lineno}`;
-            if (frame.colno != null) loc += `:${frame.colno}`;
+          parts.push(`| ${tag} | ${getFrameName(frame)} | ${getFrameLocation(frame)} |`);
+        }
+      }
+    }
+
+    // Threads
+    const data = parsedData();
+    const threadValues = data?.threads?.values as Array<{ id?: unknown; name?: string; crashed?: boolean; current?: boolean; stacktrace?: { frames?: Array<Record<string, unknown>> } }> | undefined;
+    if (threadValues && threadValues.length > 0) {
+      parts.push("");
+      parts.push("## Threads");
+      for (const thread of threadValues) {
+        const label = thread.id != null ? `Thread #${thread.id}` : "Thread";
+        const name = thread.name ? ` — ${thread.name}` : "";
+        const tags = [thread.crashed ? "crashed" : "", thread.current ? "current" : ""].filter(Boolean).join(", ");
+        parts.push("");
+        parts.push(`### ${label}${name}${tags ? ` (${tags})` : ""}`);
+        const frames = thread.stacktrace?.frames;
+        if (frames && frames.length > 0) {
+          parts.push("");
+          parts.push("| | Function | File |");
+          parts.push("|---|---|---|");
+          const reversed = [...frames].reverse();
+          for (const frame of reversed) {
+            const tag = frame.in_app ? "app" : "";
+            parts.push(`| ${tag} | ${getFrameName(frame as any)} | ${getFrameLocation(frame as any)} |`);
           }
-          parts.push(`| ${tag} | ${fn} | ${loc} |`);
         }
       }
     }
@@ -367,7 +391,7 @@ export default function IssueDetail() {
                 )}
               </div>
               <div class="inline-gap">
-                <CopyButton text={buildMarkdown()} label="Copy as Markdown" />
+                <CopyButton text={buildMarkdown} label="Copy as Markdown" />
                 <Show when={issue().status !== "resolved"}>
                   <Button
                     variant="secondary"
