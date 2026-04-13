@@ -123,22 +123,19 @@ mod tests {
                 values: vec![ExceptionValue {
                     exception_type: Some(exc_type.to_string()),
                     value: Some(value.to_string()),
-                    module: None,
                     stacktrace: Some(Stacktrace {
                         frames: vec![StackFrame {
                             filename: Some("app.js".to_string()),
                             function: Some(func.to_string()),
-                            module: None,
                             lineno: Some(42),
-                            colno: None,
-                            abs_path: None,
                             in_app: Some(true),
-                            context_line: None,
-                            pre_context: None,
-                            post_context: None,
+                            ..Default::default()
                         }],
+                        ..Default::default()
                     }),
+                    ..Default::default()
                 }],
+                ..Default::default()
             }),
             ..Default::default()
         }

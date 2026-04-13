@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// Core Sentry event as received from SDKs
@@ -29,6 +31,8 @@ pub struct SentryEvent {
     pub logentry: Option<LogEntry>,
     #[serde(default)]
     pub exception: Option<ExceptionInterface>,
+    #[serde(default)]
+    pub threads: Option<ThreadsInterface>,
     #[serde(default, deserialize_with = "deserialize_breadcrumbs")]
     pub breadcrumbs: Option<BreadcrumbsInterface>,
     #[serde(default)]
@@ -49,23 +53,31 @@ pub struct SentryEvent {
     pub modules: Option<serde_json::Value>,
     #[serde(default)]
     pub debug_meta: Option<serde_json::Value>,
+    #[serde(default, rename = "type")]
+    pub event_type: Option<String>,
+    #[serde(flatten)]
+    pub other: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LogEntry {
     #[serde(default)]
     pub message: Option<String>,
     #[serde(default)]
     pub params: Option<serde_json::Value>,
+    #[serde(flatten)]
+    pub other: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ExceptionInterface {
     #[serde(default)]
     pub values: Vec<ExceptionValue>,
+    #[serde(flatten)]
+    pub other: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ExceptionValue {
     #[serde(default, rename = "type")]
     pub exception_type: Option<String>,
@@ -75,15 +87,39 @@ pub struct ExceptionValue {
     pub module: Option<String>,
     #[serde(default)]
     pub stacktrace: Option<Stacktrace>,
+    #[serde(default)]
+    pub mechanism: Option<Mechanism>,
+    #[serde(default)]
+    pub thread_id: Option<serde_json::Value>,
+    #[serde(flatten)]
+    pub other: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Mechanism {
+    #[serde(default, rename = "type")]
+    pub mechanism_type: Option<String>,
+    #[serde(default)]
+    pub handled: Option<bool>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub data: Option<serde_json::Value>,
+    #[serde(default)]
+    pub meta: Option<serde_json::Value>,
+    #[serde(flatten)]
+    pub other: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Stacktrace {
     #[serde(default)]
     pub frames: Vec<StackFrame>,
+    #[serde(flatten)]
+    pub other: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StackFrame {
     #[serde(default)]
     pub filename: Option<String>,
@@ -105,15 +141,55 @@ pub struct StackFrame {
     pub pre_context: Option<Vec<String>>,
     #[serde(default)]
     pub post_context: Option<Vec<String>>,
+    #[serde(default)]
+    pub instruction_addr: Option<String>,
+    #[serde(default)]
+    pub symbol_addr: Option<String>,
+    #[serde(default)]
+    pub image_addr: Option<String>,
+    #[serde(default)]
+    pub package: Option<String>,
+    #[serde(default)]
+    pub addr_mode: Option<String>,
+    #[serde(default)]
+    pub trust: Option<String>,
+    #[serde(flatten)]
+    pub other: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ThreadsInterface {
+    #[serde(default)]
+    pub values: Vec<ThreadValue>,
+    #[serde(flatten)]
+    pub other: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ThreadValue {
+    #[serde(default)]
+    pub id: Option<serde_json::Value>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub crashed: Option<bool>,
+    #[serde(default)]
+    pub current: Option<bool>,
+    #[serde(default)]
+    pub stacktrace: Option<Stacktrace>,
+    #[serde(flatten)]
+    pub other: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BreadcrumbsInterface {
     #[serde(default)]
     pub values: Vec<Breadcrumb>,
+    #[serde(flatten)]
+    pub other: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Breadcrumb {
     #[serde(default)]
     pub timestamp: Option<serde_json::Value>,
@@ -127,6 +203,8 @@ pub struct Breadcrumb {
     pub message: Option<String>,
     #[serde(default)]
     pub data: Option<serde_json::Value>,
+    #[serde(flatten)]
+    pub other: HashMap<String, serde_json::Value>,
 }
 
 /// Deserialize breadcrumbs from either `{"values": [...]}` or a bare `[...]`.
@@ -145,12 +223,14 @@ where
                 .into_iter()
                 .filter_map(|v| serde_json::from_value(v).ok())
                 .collect();
-            Ok(Some(BreadcrumbsInterface { values }))
+            Ok(Some(BreadcrumbsInterface {
+                values,
+                ..Default::default()
+            }))
         }
         Some(serde_json::Value::Object(map)) => {
             let iface: BreadcrumbsInterface =
-                serde_json::from_value(serde_json::Value::Object(map))
-                    .unwrap_or(BreadcrumbsInterface { values: vec![] });
+                serde_json::from_value(serde_json::Value::Object(map)).unwrap_or_default();
             Ok(Some(iface))
         }
         Some(_) => Ok(None),
