@@ -19,6 +19,11 @@ export default function SettingsProjects() {
   const [publicKey, setPublicKey] = createSignal("");
   const [showAdvanced, setShowAdvanced] = createSignal(false);
   const [showModal, setShowModal] = createSignal(false);
+  // Holds the project the user is about to delete. Using a dedicated
+  // <Modal> instead of window.confirm() keeps the UX consistent with the
+  // rest of the settings page and avoids the native dialog's inconsistent
+  // behavior in iframes / locked-down browsers.
+  const [deleteTarget, setDeleteTarget] = createSignal<Project | null>(null);
 
   const projectsQuery = createQuery(() => ({
     queryKey: queryKeys.projects.all(),
@@ -171,11 +176,7 @@ export default function SettingsProjects() {
                         <Button
                           variant="danger"
                           size="sm"
-                          onClick={() => {
-                            if (confirm(`Delete project "${project.name}"?`)) {
-                              deleteMut.mutate(project.id);
-                            }
-                          }}
+                          onClick={() => setDeleteTarget(project)}
                         >
                           Delete
                         </Button>
@@ -188,6 +189,39 @@ export default function SettingsProjects() {
           </div>
         </Show>
       </Show>
+
+      <Modal
+        open={deleteTarget() !== null}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete project?"
+        description={
+          deleteTarget()
+            ? `"${deleteTarget()!.name}" and all of its events, issues, and releases will be permanently removed.`
+            : undefined
+        }
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              disabled={deleteMut.isPending}
+              onClick={() => {
+                const target = deleteTarget();
+                if (!target) return;
+                deleteMut.mutate(target.id, {
+                  onSettled: () => setDeleteTarget(null),
+                });
+              }}
+            >
+              {deleteMut.isPending ? "Deleting…" : "Delete"}
+            </Button>
+          </>
+        }
+      >
+        <p class="text-secondary">This action cannot be undone.</p>
+      </Modal>
     </div>
   );
 }

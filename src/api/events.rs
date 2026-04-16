@@ -59,7 +59,7 @@ async fn list_events_for_issue(
     Path(issue_id): Path<i64>,
     Query(params): Query<EventQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let limit = params.limit.min(100);
+    let limit = params.limit.clamp(1, 100);
 
     let events: Vec<EventSummary> = if let Some(ref cursor_str) = params.cursor {
         let cursor = decode_event_cursor(cursor_str).ok_or(StatusCode::BAD_REQUEST)?;

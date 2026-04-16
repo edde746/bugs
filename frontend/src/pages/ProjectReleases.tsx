@@ -6,6 +6,7 @@ import type { ProjectReleaseSummary } from "~/lib/sentry-types";
 import { relativeTime } from "~/lib/formatters";
 import LoadingSpinner from "~/components/ui/LoadingSpinner";
 import EmptyState from "~/components/ui/EmptyState";
+import ErrorState from "~/components/ui/ErrorState";
 
 export default function ProjectReleases() {
   const params = useParams<{ project: string }>();
@@ -25,6 +26,10 @@ export default function ProjectReleases() {
       </div>
 
       <Show when={!releasesQuery.isPending} fallback={<LoadingSpinner />}>
+        <Show
+          when={!releasesQuery.isError}
+          fallback={<ErrorState title="Couldn't load releases" error={releasesQuery.error} />}
+        >
         <Show
           when={releasesQuery.data && releasesQuery.data.length > 0}
           fallback={
@@ -64,6 +69,7 @@ export default function ProjectReleases() {
               </tbody>
             </table>
           </div>
+        </Show>
         </Show>
       </Show>
     </div>

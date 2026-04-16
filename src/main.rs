@@ -36,6 +36,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let db = DbPool::init(&config).await?;
 
+    // Apply symbolication cache sizing before any envelopes are processed.
+    bugs::worker::symbolication::configure_caches(&config.symbolication);
+
     let (worker_tx, worker_rx) = mpsc::channel::<bugs::worker::WorkerMessage>(10_000);
 
     let checkpoint = Arc::new(CheckpointManager::new(

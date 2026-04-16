@@ -24,6 +24,11 @@ use axum::{
 };
 
 pub fn router(state: &AppState) -> Router<AppState> {
+    // Public health endpoint — outside auth middleware so container
+    // orchestrators (Docker HEALTHCHECK, Kubernetes livenessProbe) can
+    // poll it without a token. Intentionally minimal: no DB round-trip.
+    let health_routes = Router::new().route("/api/health", get(health_check));
+
     // Auth routes - outside auth middleware so they're always accessible
     let auth_routes = Router::new()
         .route("/api/internal/auth/status", get(auth_status))
@@ -47,10 +52,15 @@ pub fn router(state: &AppState) -> Router<AppState> {
         ));
 
     Router::new()
+        .merge(health_routes)
         .merge(ingest::routes())
         .merge(auth_routes)
         .merge(management_routes)
         .merge(frontend::routes())
+}
+
+async fn health_check() -> StatusCode {
+    StatusCode::OK
 }
 
 async fn auth_status(State(state): State<AppState>) -> Json<serde_json::Value> {

@@ -9,6 +9,7 @@ import Badge from "~/components/ui/Badge";
 import Button from "~/components/ui/Button";
 import LoadingSpinner from "~/components/ui/LoadingSpinner";
 import EmptyState from "~/components/ui/EmptyState";
+import ErrorState from "~/components/ui/ErrorState";
 import IconArrowLeft from "~icons/lucide/arrow-left";
 import IconArrowRight from "~icons/lucide/arrow-right";
 
@@ -46,6 +47,10 @@ export default function IssueEvents() {
       </div>
 
       <Show when={!eventsQuery.isPending} fallback={<LoadingSpinner />}>
+        <Show
+          when={!eventsQuery.isError}
+          fallback={<ErrorState title="Couldn't load events" error={eventsQuery.error} />}
+        >
         <Show
           when={eventsQuery.data && eventsQuery.data.events.length > 0}
           fallback={
@@ -116,6 +121,7 @@ export default function IssueEvents() {
               </Button>
             </div>
           </div>
+        </Show>
         </Show>
       </Show>
     </div>

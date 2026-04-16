@@ -1,15 +1,19 @@
-use std::io::Read;
-
-use flate2::read::GzDecoder;
 use tracing::{debug, error, warn};
 
+use crate::api::ingest::decompress_gzip_capped;
 use crate::config::Config;
 use crate::db::DbPool;
 use crate::db::checkpoint::CheckpointManager;
 use crate::sentry_protocol::envelope::Envelope;
 use crate::sentry_protocol::types::SentryEvent;
+use crate::util::log::truncate;
 use crate::util::time::{hour_bucket, now_iso};
 use crate::worker::{alerts, fingerprint, indexer, normalizer, symbolication};
+
+/// Cap on the length (in chars) of any user-derived string we put through
+/// tracing macros. Big enough to keep real error messages useful, small
+/// enough to prevent log floods from hostile or oversized payloads.
+const LOG_TRUNCATE: usize = 256;
 
 pub async fn process_envelope(
     db: &DbPool,
@@ -17,11 +21,19 @@ pub async fn process_envelope(
     checkpoint: &CheckpointManager,
     envelope_id: i64,
 ) {
-    // Atomic claim: pending/failed -> processing
+    // Atomic claim: pending/failed -> processing. The third branch
+    // ('processing' + stale processing_started_at) is the stuck-worker
+    // recovery path — we only steal an in-flight envelope if the original
+    // worker appears to be dead (started more than 60s ago). Without the
+    // staleness guard two workers would race on a freshly-claimed envelope
+    // and duplicate the decompress+parse work.
     let now = now_iso();
     let claimed = sqlx::query(
         "UPDATE event_envelopes SET state = 'processing', processing_started_at = ? \
-         WHERE id = ? AND state IN ('pending', 'failed', 'processing')",
+         WHERE id = ? AND ( \
+            state IN ('pending', 'failed') \
+            OR (state = 'processing' AND processing_started_at < strftime('%Y-%m-%dT%H:%M:%SZ','now','-60 seconds')) \
+         )",
     )
     .bind(&now)
     .bind(envelope_id)
@@ -31,7 +43,11 @@ pub async fn process_envelope(
     match claimed {
         Ok(r) if r.rows_affected() == 0 => return, // already claimed
         Err(e) => {
-            error!(envelope_id, "Failed to claim envelope: {e}");
+            error!(
+                envelope_id,
+                "Failed to claim envelope: {}",
+                truncate(&e.to_string(), LOG_TRUNCATE)
+            );
             return;
         }
         _ => {}
@@ -48,8 +64,13 @@ pub async fn process_envelope(
                 .await;
         }
         Err(e) => {
-            warn!(envelope_id, "Processing failed: {e}");
-            mark_failed(db, envelope_id, &e.to_string()).await;
+            let msg = e.to_string();
+            warn!(
+                envelope_id,
+                "Processing failed: {}",
+                truncate(&msg, LOG_TRUNCATE)
+            );
+            mark_failed(db, envelope_id, &msg).await;
         }
     }
 
@@ -59,11 +80,9 @@ pub async fn process_envelope(
 }
 
 async fn mark_failed(db: &DbPool, envelope_id: i64, error_msg: &str) {
-    let truncated = if error_msg.len() > 1000 {
-        &error_msg[..1000]
-    } else {
-        error_msg
-    };
+    // Char-aware truncation — slicing on bytes can panic on multibyte
+    // UTF-8 boundaries when the upstream error contains non-ASCII data.
+    let truncated = truncate(error_msg, 1000);
 
     // Atomic update: dead-letter after 5 attempts, otherwise retry with exponential backoff.
     // No separate read — avoids TOCTOU race with concurrent workers.
@@ -101,12 +120,11 @@ async fn process_inner(
     let raw_body = row.1;
     let _content_encoding = row.2;
 
-    // 2. Decompress if gzipped (check 0x1f 0x8b magic bytes)
+    // 2. Decompress if gzipped (check 0x1f 0x8b magic bytes); cap at the
+    //    same envelope limit used at ingest so a stored bomb can't OOM the
+    //    worker if it ever reaches us.
     let body = if raw_body.len() >= 2 && raw_body[0] == 0x1f && raw_body[1] == 0x8b {
-        let mut decoder = GzDecoder::new(&raw_body[..]);
-        let mut decompressed = Vec::new();
-        decoder.read_to_end(&mut decompressed)?;
-        decompressed
+        decompress_gzip_capped(&raw_body, config.ingest.max_envelope_bytes)?
     } else {
         raw_body
     };
@@ -127,12 +145,26 @@ async fn process_inner(
         // 5. Normalize
         normalizer::normalize(&mut event);
 
-        // 6. Symbolicate using source maps
-        if let Err(e) =
-            symbolication::symbolicate_event(&mut event, db, &config.artifacts_dir).await
-        {
-            warn!(envelope_id, "Symbolication failed (non-fatal): {e}");
-        }
+        // 6. Symbolicate using source maps. The outcome is persisted on
+        //    the event row so a later release-file upload can identify
+        //    which events need re-symbolication.
+        let sym_outcome =
+            match symbolication::symbolicate_event(&mut event, db, &config.artifacts_dir).await {
+                Ok(outcome) => outcome,
+                Err(e) => {
+                    warn!(
+                        envelope_id,
+                        "Symbolication failed (non-fatal): {}",
+                        truncate(&e.to_string(), LOG_TRUNCATE)
+                    );
+                    symbolication::SymbolicationOutcome::NotAttempted
+                }
+            };
+        let symbolication_state: Option<&'static str> = match sym_outcome {
+            symbolication::SymbolicationOutcome::NotAttempted => None,
+            symbolication::SymbolicationOutcome::Ok => Some("ok"),
+            symbolication::SymbolicationOutcome::MissingMap => Some("missing_map"),
+        };
 
         // 7. Compute fingerprint
         let fp = fingerprint::compute_fingerprint(&event);
@@ -283,8 +315,8 @@ async fn process_inner(
         let event_row: (i64,) = sqlx::query_as(
             "INSERT INTO events (event_id, project_id, issue_id, timestamp, received_at, level, \
                 platform, release, environment, transaction_name, trace_id, message, title, \
-                exception_values, stacktrace_functions, data) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+                exception_values, stacktrace_functions, data, symbolication_state) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
              RETURNING id",
         )
         .bind(&event_id)
@@ -303,6 +335,7 @@ async fn process_inner(
         .bind(&exception_values)
         .bind(&stacktrace_functions)
         .bind(&data)
+        .bind(symbolication_state)
         .fetch_one(db.writer())
         .await?;
 

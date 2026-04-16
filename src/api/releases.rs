@@ -1,17 +1,15 @@
-use std::io::Read;
-
 use axum::{
     Json, Router,
     extract::{Multipart, Path, Query, State},
     http::StatusCode,
     routing::{get, post},
 };
-use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tracing::warn;
 
 use crate::AppState;
+use crate::api::ingest::{DecompressError, decompress_gzip_capped};
 use crate::models::deploy::*;
 use crate::models::release::*;
 
@@ -297,15 +295,22 @@ async fn upload_release_file(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // Decompress if gzipped
+    // Decompress if gzipped (capped to defeat decompression bombs)
+    let max_attachment = state.config.ingest.max_attachment_bytes;
     let content = if file_content.len() >= 2 && file_content[0] == 0x1f && file_content[1] == 0x8b {
-        let mut decoder = GzDecoder::new(&file_content[..]);
-        let mut decompressed = Vec::new();
-        decoder
-            .read_to_end(&mut decompressed)
-            .map_err(|e| (StatusCode::BAD_REQUEST, format!("Gzip decode error: {e}")))?;
-        decompressed
+        decompress_gzip_capped(&file_content, max_attachment).map_err(|e| match e {
+            DecompressError::SizeExceeded => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "Decompressed artifact too large".into(),
+            ),
+            DecompressError::Io(io) => {
+                (StatusCode::BAD_REQUEST, format!("Gzip decode error: {io}"))
+            }
+        })?
     } else {
+        if file_content.len() > max_attachment {
+            return Err((StatusCode::PAYLOAD_TOO_LARGE, "Artifact too large".into()));
+        }
         file_content
     };
 
@@ -314,8 +319,20 @@ async fn upload_release_file(
     hasher.update(&content);
     let sha256 = hex::encode(hasher.finalize());
 
-    // Sanitize name for filesystem path
-    let sanitized_name = artifact_name.replace("~/", "").replace(['/', '\\'], "_");
+    // Sanitize name for filesystem path. Sentry artifact names often look
+    // like URLs ("~/static/js/app.js"), so we strip the leading "~/" and
+    // then collapse path separators. After that, reject anything that
+    // could escape the release directory or address it specially.
+    let stripped = artifact_name.strip_prefix("~/").unwrap_or(&artifact_name);
+    let sanitized_name = stripped.replace(['/', '\\'], "_");
+    let invalid_name = sanitized_name.is_empty()
+        || sanitized_name == "."
+        || sanitized_name == ".."
+        || sanitized_name.starts_with('.')
+        || sanitized_name.contains('\0');
+    if invalid_name {
+        return Err((StatusCode::BAD_REQUEST, "Invalid artifact name".to_string()));
+    }
 
     // Build file path
     let org_id: i64 = 1;
@@ -332,6 +349,19 @@ async fn upload_release_file(
             format!("Failed to create dir: {e}"),
         )
     })?;
+
+    // Defense in depth: confirm the resolved path stays inside the release
+    // directory after canonicalization (handles symlinks etc.).
+    let canonical_dir = tokio::fs::canonicalize(&dir_path).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to resolve dir: {e}"),
+        )
+    })?;
+    let target = canonical_dir.join(&sanitized_name);
+    if !target.starts_with(&canonical_dir) {
+        return Err((StatusCode::BAD_REQUEST, "Invalid artifact name".to_string()));
+    }
 
     tokio::fs::write(&file_path, &content).await.map_err(|e| {
         (

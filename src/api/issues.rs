@@ -80,7 +80,7 @@ async fn list_issues(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let project_id = resolve_project_id(&state, &slug).await?;
 
-    let limit = params.limit.min(100);
+    let limit = params.limit.clamp(1, 100);
     let status = params.status.as_deref().unwrap_or("unresolved");
     let sort_col = match params.sort.as_deref() {
         Some("first_seen") => "first_seen",

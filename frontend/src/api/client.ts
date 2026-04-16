@@ -10,9 +10,34 @@ export class ApiError extends Error {
   }
 }
 
+// Ensures a 401 burst from concurrent in-flight requests only triggers a
+// single redirect to /login. Without this guard, N parallel queries would
+// each clear the token and navigate, causing jittery double-redirects and
+// spurious error toasts.
+let loggingOut = false;
+
+function triggerLogout() {
+  if (loggingOut) return;
+  loggingOut = true;
+  localStorage.removeItem("bugs_admin_token");
+  // Race-free guard: if we're already on /login, do nothing.
+  if (window.location.pathname !== "/login") {
+    window.location.href = "/login";
+  }
+}
+
+export interface ApiRequestOptions extends RequestInit {
+  /**
+   * Abort signal from the caller (typically tanstack-query's queryFn/mutationFn).
+   * When the signal fires before the response lands, the underlying fetch is
+   * cancelled and this request rejects with a DOMException('AbortError').
+   */
+  signal?: AbortSignal;
+}
+
 export async function apiRequest<T>(
   path: string,
-  options: RequestInit = {},
+  options: ApiRequestOptions = {},
 ): Promise<T> {
   const token = localStorage.getItem("bugs_admin_token");
   const headers: Record<string, string> = {
@@ -21,11 +46,14 @@ export async function apiRequest<T>(
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const response = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+  const response = await fetch(`${BASE_URL}${path}`, {
+    ...options,
+    headers,
+    signal: options.signal,
+  });
   if (!response.ok) {
-    if (response.status === 401 && window.location.pathname !== "/login") {
-      localStorage.removeItem("bugs_admin_token");
-      window.location.href = "/login";
+    if (response.status === 401) {
+      triggerLogout();
       throw new ApiError(response.status, response.statusText, null);
     }
     const body = await response.json().catch(() => null);
@@ -36,10 +64,12 @@ export async function apiRequest<T>(
 }
 
 export const api = {
-  get: <T>(path: string) => apiRequest<T>(path),
-  post: <T>(path: string, body: unknown) =>
-    apiRequest<T>(path, { method: "POST", body: JSON.stringify(body) }),
-  put: <T>(path: string, body: unknown) =>
-    apiRequest<T>(path, { method: "PUT", body: JSON.stringify(body) }),
-  delete: <T>(path: string) => apiRequest<T>(path, { method: "DELETE" }),
+  get: <T>(path: string, signal?: AbortSignal) =>
+    apiRequest<T>(path, { signal }),
+  post: <T>(path: string, body: unknown, signal?: AbortSignal) =>
+    apiRequest<T>(path, { method: "POST", body: JSON.stringify(body), signal }),
+  put: <T>(path: string, body: unknown, signal?: AbortSignal) =>
+    apiRequest<T>(path, { method: "PUT", body: JSON.stringify(body), signal }),
+  delete: <T>(path: string, signal?: AbortSignal) =>
+    apiRequest<T>(path, { method: "DELETE", signal }),
 };

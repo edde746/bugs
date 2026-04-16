@@ -121,6 +121,12 @@ Sentry.init({
 
 The DSN is shown in project settings after creating a project.
 
+## Database migrations
+
+Schema changes live in `migrations/` as numbered SQL files. They are applied once in order on startup and tracked in the `_migrations` table.
+
+The migration runner is **forward-only** — there is no rollback mechanism and no down migrations. To change an existing schema object, add a new migration that performs the alteration (SQLite often requires the full table-rebuild pattern: new table, `INSERT SELECT`, drop, rename; see `014_event_tags_project_fk.sql`). Don't edit files that have already been released.
+
 ## Development
 
 ```bash

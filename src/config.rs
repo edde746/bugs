@@ -25,6 +25,8 @@ pub struct Config {
     #[serde(default)]
     pub ingest: IngestConfig,
     #[serde(default)]
+    pub symbolication: SymbolicationConfig,
+    #[serde(default)]
     pub email: EmailConfig,
 }
 
@@ -87,6 +89,36 @@ impl Default for IngestConfig {
             max_tag_values_per_key: default_max_tag_values_per_key(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SymbolicationConfig {
+    /// Max number of parsed source maps held in memory.
+    /// Each entry is a parsed `SourceMap` which can be a few MB for large
+    /// bundles; raise this if you have many active releases.
+    #[serde(default = "default_source_map_cache_size")]
+    pub source_map_cache_size: usize,
+    /// Max number of (release version -> release_files) lookups cached.
+    /// Cheap to hold; raising it lets busy multi-release deployments skip
+    /// the DB on the symbolication hot path.
+    #[serde(default = "default_release_files_cache_size")]
+    pub release_files_cache_size: usize,
+}
+
+impl Default for SymbolicationConfig {
+    fn default() -> Self {
+        Self {
+            source_map_cache_size: default_source_map_cache_size(),
+            release_files_cache_size: default_release_files_cache_size(),
+        }
+    }
+}
+
+fn default_source_map_cache_size() -> usize {
+    64
+}
+fn default_release_files_cache_size() -> usize {
+    32
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -189,6 +221,7 @@ impl Default for Config {
             auth: AuthConfig::default(),
             sqlite: SqliteConfig::default(),
             ingest: IngestConfig::default(),
+            symbolication: SymbolicationConfig::default(),
             email: EmailConfig::default(),
         }
     }

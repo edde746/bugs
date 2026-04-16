@@ -129,12 +129,15 @@ pub async fn index_event(
     // UPSERT tag_values and track which keys got new values.
     // Respects cardinality cap: only inserts new values if under max_values.
     for (key, value) in &tags {
-        // Try to insert new value, but only if under the cardinality cap.
-        // Uses INSERT ... SELECT with a WHERE clause to enforce the cap atomically.
+        // Try to insert a new value, but only if under the cardinality cap.
+        // The cap check uses COUNT(*) against tag_values directly instead of
+        // the cached tag_keys.values_seen counter — otherwise two inserts can
+        // slip past the cap in the window between the first insert and the
+        // counter's later recount, because the counter lags by one statement.
         let insert_result = sqlx::query(
             "INSERT OR IGNORE INTO tag_values (project_id, key, value, times_seen, last_seen) \
              SELECT ?, ?, ?, 1, ? \
-             WHERE COALESCE((SELECT values_seen FROM tag_keys WHERE project_id = ? AND key = ?), 0) < ?",
+             WHERE (SELECT COUNT(*) FROM tag_values WHERE project_id = ? AND key = ?) < ?",
         )
         .bind(project_id)
         .bind(key)

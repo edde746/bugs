@@ -7,10 +7,14 @@ use sourcemap::SourceMap;
 use tracing::{debug, warn};
 use url::Url;
 
+use crate::config::SymbolicationConfig;
 use crate::db::DbPool;
 use crate::models::release::ReleaseFile;
 use crate::sentry_protocol::types::SentryEvent;
 
+// Initial capacities — intentionally small. `configure_caches` runs once
+// at startup to resize these to the user's configured values before any
+// envelopes are processed.
 static SM_CACHE: Lazy<Mutex<LruCache<String, Arc<SourceMap>>>> =
     Lazy::new(|| Mutex::new(LruCache::new(NonZeroUsize::new(64).unwrap())));
 
@@ -18,20 +22,54 @@ static SM_CACHE: Lazy<Mutex<LruCache<String, Arc<SourceMap>>>> =
 static RELEASE_FILES_CACHE: Lazy<Mutex<LruCache<String, Arc<Vec<ReleaseFile>>>>> =
     Lazy::new(|| Mutex::new(LruCache::new(NonZeroUsize::new(32).unwrap())));
 
+/// Resize the symbolication caches to match the user's configuration.
+/// Call this once during startup before spawning workers. A zero or
+/// unreasonable configured size is clamped to a sensible floor rather
+/// than panicking.
+pub fn configure_caches(cfg: &SymbolicationConfig) {
+    let sm_cap = NonZeroUsize::new(cfg.source_map_cache_size.max(1)).expect("max(1) is non-zero");
+    let files_cap =
+        NonZeroUsize::new(cfg.release_files_cache_size.max(1)).expect("max(1) is non-zero");
+    SM_CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .resize(sm_cap);
+    RELEASE_FILES_CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .resize(files_cap);
+}
+
+/// Result of attempting to symbolicate an event. Used by the worker to
+/// record why source maps were or weren't applied, so events missing a
+/// map can be reprocessed later without re-parsing the whole envelope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolicationOutcome {
+    /// Symbolication wasn't attempted (no release or no applicable frames).
+    NotAttempted,
+    /// Symbolication ran.
+    Ok,
+    /// Release is known but no `.map` file registered for it. Eligible
+    /// for retry when a release file is later uploaded.
+    MissingMap,
+}
+
 pub async fn symbolicate_event(
     event: &mut SentryEvent,
     db: &DbPool,
     _artifacts_dir: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<SymbolicationOutcome, Box<dyn std::error::Error + Send + Sync>> {
     // 1. Check if event has a release field
     let release_version = match &event.release {
         Some(v) if !v.is_empty() => v.clone(),
-        _ => return Ok(()),
+        _ => return Ok(SymbolicationOutcome::NotAttempted),
     };
 
     // 2. Load release files (cached by release version to avoid repeated DB lookups)
     let release_files = {
-        let mut cache = RELEASE_FILES_CACHE.lock().unwrap();
+        let mut cache = RELEASE_FILES_CACHE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         cache.get(&release_version).cloned()
     };
 
@@ -45,8 +83,12 @@ pub async fn symbolicate_event(
                     .await?;
 
             let release_id = match release_row {
+                // Release not registered at all — SDK sent a `release` tag but
+                // nobody has created the release record. Nothing to retry
+                // from our side, so treat it as "no attempt" rather than
+                // "missing map".
                 Some((id,)) => id,
-                None => return Ok(()),
+                None => return Ok(SymbolicationOutcome::NotAttempted),
             };
 
             let files: Vec<ReleaseFile> =
@@ -57,22 +99,32 @@ pub async fn symbolicate_event(
 
             let files = Arc::new(files);
             {
-                let mut cache = RELEASE_FILES_CACHE.lock().unwrap();
+                let mut cache = RELEASE_FILES_CACHE
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 cache.put(release_version.clone(), Arc::clone(&files));
             }
             files
         }
     };
 
+    // Release exists but no files uploaded yet — flag so a later upload
+    // can requeue these events.
     if release_files.is_empty() {
-        return Ok(());
+        return Ok(SymbolicationOutcome::MissingMap);
     }
 
     // 4. For each exception value's stacktrace frames, symbolicate
     let exception = match &mut event.exception {
         Some(exc) => exc,
-        None => return Ok(()),
+        None => return Ok(SymbolicationOutcome::NotAttempted),
     };
+
+    // Track whether we had frames that looked symbolicatable but couldn't
+    // find a matching .map — that's the "map uploaded for some bundles but
+    // not this one" case, still worth flagging for retry.
+    let mut had_map_miss = false;
+    let mut any_frame_mapped = false;
 
     for exc_value in &mut exception.values {
         let stacktrace = match &mut exc_value.stacktrace {
@@ -96,8 +148,12 @@ pub async fn symbolicate_event(
             let map_name = format!("{}.map", artifact_name);
             let release_file = match release_files.iter().find(|rf| rf.name == map_name) {
                 Some(rf) => rf,
-                None => continue,
+                None => {
+                    had_map_miss = true;
+                    continue;
+                }
             };
+            any_frame_mapped = true;
 
             // Load and parse the source map
             let sm = match load_source_map(&release_file.file_path).await {
@@ -187,7 +243,14 @@ pub async fn symbolicate_event(
         }
     }
 
-    Ok(())
+    // If we saw frames that wanted a map but none mapped, that's a miss.
+    // If we mapped at least one frame, treat the event as "ok" even if
+    // other frames lacked a matching bundle — retry won't help those.
+    Ok(if !any_frame_mapped && had_map_miss {
+        SymbolicationOutcome::MissingMap
+    } else {
+        SymbolicationOutcome::Ok
+    })
 }
 
 async fn load_source_map(
@@ -195,7 +258,7 @@ async fn load_source_map(
 ) -> Result<Arc<SourceMap>, Box<dyn std::error::Error + Send + Sync>> {
     // Check cache first
     {
-        let mut cache = SM_CACHE.lock().unwrap();
+        let mut cache = SM_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(sm) = cache.get(file_path) {
             return Ok(Arc::clone(sm));
         }
@@ -211,7 +274,7 @@ async fn load_source_map(
 
     // Store in cache
     {
-        let mut cache = SM_CACHE.lock().unwrap();
+        let mut cache = SM_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         cache.put(file_path.to_string(), Arc::clone(&sm));
     }
 

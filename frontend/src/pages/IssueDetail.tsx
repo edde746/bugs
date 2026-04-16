@@ -5,9 +5,11 @@ import { api } from "~/api/client";
 import { queryKeys } from "~/queries/keys";
 import type { Issue, Event as SentryEvent, UpdateIssueInput, EventListResponse, IssueComment, IssueActivity } from "~/lib/sentry-types";
 import { relativeTime, formatNumber, displayValue } from "~/lib/formatters";
+import { parseEventData } from "~/lib/eventData";
 import { STATUS_LABELS } from "~/lib/constants";
 import Badge from "~/components/ui/Badge";
 import Button from "~/components/ui/Button";
+import ErrorState from "~/components/ui/ErrorState";
 import LoadingSpinner from "~/components/ui/LoadingSpinner";
 import ExceptionDisplay from "~/components/events/ExceptionDisplay";
 import BreadcrumbsTimeline from "~/components/events/BreadcrumbsTimeline";
@@ -73,15 +75,16 @@ export default function IssueDetail() {
 
   const currentEvent = () => eventDetailQuery.data ?? currentEventSummary();
 
-  const parsedData = createMemo(() => {
-    const event = eventDetailQuery.data;
-    if (!event) return null;
-    try {
-      return JSON.parse(event.data);
-    } catch {
-      return null;
-    }
-  });
+  // Parse via the shared helper so a malformed body shows an error UI
+  // instead of silently returning null. Downstream accessors read off
+  // `parsedData()` for the happy path; the JSX checks `!parseOk()` to
+  // show the error surface when the body couldn't be parsed.
+  const parseResult = createMemo(() => parseEventData(eventDetailQuery.data));
+  const parsedData = () => {
+    const r = parseResult();
+    return r.ok ? r.data : null;
+  };
+  const parseOk = () => parseResult().ok;
 
   const exceptions = () => {
     const data = parsedData();
@@ -159,8 +162,7 @@ export default function IssueDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.issues.detail(params.issueId) });
       queryClient.invalidateQueries({
-        queryKey: queryKeys.issues.list(params.project, {}),
-        exact: false,
+        queryKey: queryKeys.issues.listPrefix(params.project),
       });
     },
   }));
@@ -604,6 +606,13 @@ export default function IssueDetail() {
                         <span>Logger: {String(parsedData()!.logger)}</span>
                       </Show>
                     </div>
+
+                    <Show when={eventDetailQuery.data && !parseOk()}>
+                      <ErrorState
+                        title="Couldn't display event details"
+                        description="The event body could not be parsed. Reporting from the underlying SDK may be malformed or truncated."
+                      />
+                    </Show>
 
                     <Show when={eventMessage() && exceptions().length === 0}>
                       <div class="event-message">

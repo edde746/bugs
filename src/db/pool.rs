@@ -120,6 +120,15 @@ impl DbPool {
         }
     }
 
+    /// Apply pending migrations.
+    ///
+    /// The migration system is intentionally **forward-only**: each SQL
+    /// file in `migrations/` is applied once in filename order and
+    /// recorded in `_migrations`. There is no down-migration machinery
+    /// and no rollback. New migrations must be additive — if you need
+    /// to alter an existing table, write a follow-up migration that
+    /// migrates data forward (see `014_event_tags_project_fk.sql` for
+    /// an example of the table-rebuild pattern that SQLite requires).
     async fn run_migrations(&self) -> Result<(), sqlx::Error> {
         // Set auto_vacuum before creating tables (only effective on empty DB)
         sqlx::query("PRAGMA auto_vacuum = INCREMENTAL")
@@ -151,6 +160,10 @@ impl DbPool {
             include_str!("../../migrations/010_performance.sql"),
             include_str!("../../migrations/011_issue_sort_indexes.sql"),
             include_str!("../../migrations/012_issue_filter_indexes.sql"),
+            include_str!("../../migrations/013_fts5_update_trigger.sql"),
+            include_str!("../../migrations/014_event_tags_project_fk.sql"),
+            include_str!("../../migrations/015_additional_indexes.sql"),
+            include_str!("../../migrations/016_symbolication_state.sql"),
         ];
 
         for (i, sql) in migrations.iter().enumerate() {

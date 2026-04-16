@@ -167,9 +167,12 @@ async fn test_ingest_rejects_mismatched_project_id() {
         .await
         .unwrap();
 
+    // The mismatch path now returns 401 to match the invalid-key path —
+    // we don't want to tell attackers whether a key exists and belongs
+    // to a different project vs. doesn't exist at all.
     assert_eq!(
         resp.status(),
-        400,
+        401,
         "Mismatched project_id should be rejected"
     );
 }
@@ -334,6 +337,236 @@ async fn test_search() {
 
     let results = search_resp["results"].as_array().unwrap();
     assert!(!results.is_empty(), "FTS5 search should find the event");
+}
+
+// --- Security & integrity regression tests (phase 1/2 audit) ---
+
+#[tokio::test]
+async fn test_invalid_dsn_returns_401() {
+    let (base_url, _handle) = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    // Create a project so there's at least one valid key in the DB.
+    let project: serde_json::Value = client
+        .post(format!("{base_url}/api/internal/projects"))
+        .json(&serde_json::json!({"name": "Auth", "slug": "auth"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let pid = project["id"].as_i64().unwrap();
+
+    let event_id = "11111111111111111111111111111111";
+    let event = serde_json::json!({"event_id": event_id, "level": "error"});
+    let event_str = serde_json::to_string(&event).unwrap();
+    let envelope = format!(
+        "{{\"event_id\":\"{event_id}\"}}\n{{\"type\":\"event\",\"length\":{}}}\n{event_str}\n",
+        event_str.len()
+    );
+
+    let resp = client
+        .post(format!("{base_url}/api/{pid}/envelope/"))
+        .header("X-Sentry-Auth", "Sentry sentry_key=nothingrealhere")
+        .body(envelope)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        401,
+        "Unknown sentry_key must be rejected with 401"
+    );
+}
+
+#[tokio::test]
+async fn test_gzip_decompression_bomb_is_capped() {
+    let (base_url, _handle) = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    // Need a valid key just to reach the decompression stage.
+    let project: serde_json::Value = client
+        .post(format!("{base_url}/api/internal/projects"))
+        .json(&serde_json::json!({"name": "Bomb", "slug": "bomb"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let pid = project["id"].as_i64().unwrap();
+    let keys: Vec<serde_json::Value> = client
+        .get(format!("{base_url}/api/internal/projects/{pid}/keys"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let key = keys[0]["public_key"].as_str().unwrap();
+
+    // Build a highly-compressible payload whose decompressed size is
+    // well over max_envelope_bytes (10 MB default). 64 MB of zeros
+    // gzips to a few KB.
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+    use std::io::Write;
+
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
+    encoder.write_all(&vec![0u8; 64 * 1024 * 1024]).unwrap();
+    let gzipped = encoder.finish().unwrap();
+    assert!(
+        gzipped.len() < 1024 * 1024,
+        "sanity: compressed bomb should be tiny"
+    );
+
+    let resp = client
+        .post(format!("{base_url}/api/{pid}/envelope/"))
+        .header("X-Sentry-Auth", format!("Sentry sentry_key={key}"))
+        .header("Content-Encoding", "gzip")
+        .body(gzipped)
+        .send()
+        .await
+        .unwrap();
+
+    // 413 is the fix's primary response; 400 is acceptable if the
+    // decoder rejects the stream early for some other reason, but 200
+    // would mean the cap didn't fire.
+    let status = resp.status().as_u16();
+    assert!(
+        status == 413 || status == 400,
+        "expected 413/400 from capped decompress, got {status}"
+    );
+}
+
+#[tokio::test]
+async fn test_envelope_dedup_same_event_id() {
+    let (base_url, _handle) = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    let project: serde_json::Value = client
+        .post(format!("{base_url}/api/internal/projects"))
+        .json(&serde_json::json!({"name": "Dedup", "slug": "dedup"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let pid = project["id"].as_i64().unwrap();
+    let keys: Vec<serde_json::Value> = client
+        .get(format!("{base_url}/api/internal/projects/{pid}/keys"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let key = keys[0]["public_key"].as_str().unwrap();
+
+    let event_id = "cafebabecafebabecafebabecafebabe";
+    let event = serde_json::json!({
+        "event_id": event_id,
+        "level": "error",
+        "message": "dedup-test",
+    });
+    let event_str = serde_json::to_string(&event).unwrap();
+    let envelope = format!(
+        "{{\"event_id\":\"{event_id}\"}}\n{{\"type\":\"event\",\"length\":{}}}\n{event_str}\n",
+        event_str.len()
+    );
+
+    // Send the same envelope twice back to back.
+    for _ in 0..2 {
+        let resp = client
+            .post(format!("{base_url}/api/{pid}/envelope/"))
+            .header("X-Sentry-Auth", format!("Sentry sentry_key={key}"))
+            .body(envelope.clone())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+    }
+
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    let issues: serde_json::Value = client
+        .get(format!("{base_url}/api/internal/projects/dedup/issues"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let list = issues["issues"].as_array().unwrap();
+    assert_eq!(
+        list.len(),
+        1,
+        "duplicate event should not create a 2nd issue"
+    );
+    assert_eq!(
+        list[0]["event_count"].as_i64().unwrap(),
+        1,
+        "duplicate event_id should be dropped via INSERT OR IGNORE — event_count must stay at 1"
+    );
+}
+
+#[tokio::test]
+async fn test_artifact_name_path_traversal_rejected() {
+    let (base_url, _handle) = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    let project: serde_json::Value = client
+        .post(format!("{base_url}/api/internal/projects"))
+        .json(&serde_json::json!({"name": "Traversal", "slug": "traversal"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let _pid = project["id"].as_i64().unwrap();
+
+    // Hand-craft a multipart/form-data body with name=".." so we don't
+    // depend on reqwest's `multipart` feature (not enabled in this
+    // crate). The server must reject the literal ".." artifact name.
+    let boundary = "----bugs-test-boundary-abc";
+    let body_str = format!(
+        "--{b}\r\n\
+         Content-Disposition: form-data; name=\"name\"\r\n\r\n\
+         ..\r\n\
+         --{b}\r\n\
+         Content-Disposition: form-data; name=\"dist\"\r\n\r\n\
+         \r\n\
+         --{b}\r\n\
+         Content-Disposition: form-data; name=\"file\"; filename=\"map.js\"\r\n\
+         Content-Type: application/octet-stream\r\n\r\n\
+         console.log(1);\r\n\
+         --{b}--\r\n",
+        b = boundary
+    );
+
+    let resp = client
+        .post(format!(
+            "{base_url}/api/0/projects/default/traversal/releases/v1/files/"
+        ))
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(body_str)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        400,
+        "artifact name '..' must be rejected as BAD_REQUEST"
+    );
 }
 
 // --- Test harness ---

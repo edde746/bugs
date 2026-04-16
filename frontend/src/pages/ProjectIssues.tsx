@@ -11,6 +11,7 @@ import Button from "~/components/ui/Button";
 import RelativeTime from "~/components/ui/RelativeTime";
 import LoadingSpinner from "~/components/ui/LoadingSpinner";
 import EmptyState from "~/components/ui/EmptyState";
+import ErrorState from "~/components/ui/ErrorState";
 import IconArrowLeft from "~icons/lucide/arrow-left";
 import IconArrowRight from "~icons/lucide/arrow-right";
 
@@ -99,9 +100,10 @@ export default function ProjectIssues() {
 
   const onBulkSuccess = () => {
     clearSelection();
+    // Use the list prefix so we invalidate every filter variant of the
+    // project's issues list, not just one with an empty filter object.
     queryClient.invalidateQueries({
-      queryKey: queryKeys.issues.list(params.project, {}),
-      exact: false,
+      queryKey: queryKeys.issues.listPrefix(params.project),
     });
   };
 
@@ -286,6 +288,15 @@ export default function ProjectIssues() {
 
       <Show when={!issuesQuery.isPending} fallback={<LoadingSpinner />}>
         <Show
+          when={!issuesQuery.isError}
+          fallback={
+            <ErrorState
+              title="Couldn't load issues"
+              error={issuesQuery.error}
+            />
+          }
+        >
+        <Show
           when={issuesQuery.data && issuesQuery.data.issues.length > 0}
           fallback={
             <EmptyState
@@ -379,6 +390,7 @@ export default function ProjectIssues() {
               </Button>
             </div>
           </div>
+        </Show>
         </Show>
       </Show>
     </div>
