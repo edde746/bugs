@@ -1,4 +1,6 @@
 use sqlx::SqlitePool;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
 use tokio::time::{Duration, interval};
 use tracing::{info, warn};
 
@@ -6,16 +8,20 @@ pub fn spawn_retention_task(
     writer: SqlitePool,
     retention_days: u32,
     envelope_retention_hours: u32,
-) {
+    mut shutdown: watch::Receiver<bool>,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut timer = interval(Duration::from_secs(3600));
         loop {
-            timer.tick().await;
+            tokio::select! {
+                _ = timer.tick() => {}
+                _ = shutdown.changed() => break,
+            }
             if let Err(e) = run_cleanup(&writer, retention_days, envelope_retention_hours).await {
                 warn!("Retention cleanup failed: {e}");
             }
         }
-    });
+    })
 }
 
 /// Public entry point for manual cleanup trigger

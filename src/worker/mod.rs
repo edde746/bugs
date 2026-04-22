@@ -8,7 +8,8 @@ pub mod releases;
 pub mod symbolication;
 
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
 use tracing::info;
 
 use crate::config::Config;
@@ -23,8 +24,10 @@ pub fn spawn(
     checkpoint: Arc<CheckpointManager>,
     tx: mpsc::Sender<WorkerMessage>,
     rx: mpsc::Receiver<WorkerMessage>,
-) {
+    shutdown: watch::Receiver<bool>,
+) -> Vec<JoinHandle<()>> {
     let num_workers = config.worker_threads;
+    let mut handles = Vec::with_capacity(num_workers + 1);
 
     // Wrap the single receiver in Arc<Mutex> so workers compete for messages
     let shared_rx = Arc::new(tokio::sync::Mutex::new(rx));
@@ -35,14 +38,20 @@ pub fn spawn(
         let config = config.clone();
         let checkpoint = checkpoint.clone();
         let rx = shared_rx.clone();
+        let mut shutdown = shutdown.clone();
 
-        tokio::spawn(async move {
+        handles.push(tokio::spawn(async move {
             info!(worker_id, "Worker started");
             loop {
-                // Only one worker receives each message
+                // Only one worker receives each message. Select on shutdown
+                // so an idle worker exits promptly instead of blocking on
+                // recv() until the channel is dropped.
                 let envelope_id = {
                     let mut rx = rx.lock().await;
-                    rx.recv().await
+                    tokio::select! {
+                        msg = rx.recv() => msg,
+                        _ = shutdown.changed() => break,
+                    }
                 };
 
                 match envelope_id {
@@ -52,17 +61,21 @@ pub fn spawn(
                     None => break, // channel closed
                 }
             }
-        });
+        }));
     }
 
     // Spawn poller for missed/failed/stuck envelopes
     let db_poll = db.clone();
     let config_poll = config.clone();
-    tokio::spawn(async move {
+    let mut poll_shutdown = shutdown.clone();
+    handles.push(tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
         let mut tick_count: u64 = 0;
         loop {
-            interval.tick().await;
+            tokio::select! {
+                _ = interval.tick() => {}
+                _ = poll_shutdown.changed() => break,
+            }
             poll_envelopes(&db_poll, &tx).await;
 
             tick_count += 1;
@@ -76,7 +89,9 @@ pub fn spawn(
                 cleanup_old_transactions(&db_poll, config_poll.retention_days).await;
             }
         }
-    });
+    }));
+
+    handles
 }
 
 /// Unmute issues whose snooze_until has expired. Uses UPDATE RETURNING to avoid TOCTOU race.

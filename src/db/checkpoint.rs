@@ -1,6 +1,8 @@
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
 use tokio::time::{Duration, interval};
 use tracing::{debug, info, warn};
 
@@ -50,13 +52,19 @@ impl CheckpointManager {
     }
 
     /// Spawn a background task that runs truncate checkpoints during quiet periods
-    pub fn spawn_quiet_checkpoint_task(self: Arc<Self>) {
+    pub fn spawn_quiet_checkpoint_task(
+        self: Arc<Self>,
+        mut shutdown: watch::Receiver<bool>,
+    ) -> JoinHandle<()> {
         tokio::spawn(async move {
             let mut timer = interval(Duration::from_secs(10));
             let mut last_batch_count = 0u64;
 
             loop {
-                timer.tick().await;
+                tokio::select! {
+                    _ = timer.tick() => {}
+                    _ = shutdown.changed() => break,
+                }
                 let current = self.batch_count.load(Ordering::Relaxed);
                 if current == last_batch_count && current > 0 {
                     // No new batches in last interval -> quiet period
@@ -64,6 +72,6 @@ impl CheckpointManager {
                 }
                 last_batch_count = current;
             }
-        });
+        })
     }
 }

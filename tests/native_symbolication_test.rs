@@ -398,12 +398,14 @@ async fn start_test_server() -> (String, String, tokio::task::JoinHandle<()>) {
                 10,
             ));
 
+            let (_shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
             bugs::worker::spawn(
                 db.clone(),
                 config.clone(),
                 checkpoint.clone(),
                 worker_tx.clone(),
                 worker_rx,
+                shutdown_rx,
             );
 
             let state = bugs::AppState {
