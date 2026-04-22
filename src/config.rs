@@ -93,29 +93,42 @@ impl Default for IngestConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SymbolicationConfig {
-    /// Max number of parsed source maps held in memory.
-    /// Each entry is a parsed `SourceMap` which can be a few MB for large
-    /// bundles; raise this if you have many active releases.
+    /// Max number of parsed source maps held in memory. Acts as a secondary
+    /// bound alongside `source_map_cache_bytes_mb` — whichever trips first
+    /// triggers eviction.
     #[serde(default = "default_source_map_cache_size")]
     pub source_map_cache_size: usize,
+    /// Aggregate byte budget for parsed source maps. A single 2 MB source
+    /// map can expand 2–3× when parsed; without a byte cap a handful of
+    /// large entries pin hundreds of MB of heap for the life of the
+    /// process.
+    #[serde(default = "default_source_map_cache_bytes_mb")]
+    pub source_map_cache_bytes_mb: usize,
     /// Max number of (release version -> release_files) lookups cached.
     /// Cheap to hold; raising it lets busy multi-release deployments skip
     /// the DB on the symbolication hot path.
     #[serde(default = "default_release_files_cache_size")]
     pub release_files_cache_size: usize,
     /// Max number of mmap'd native SymCache files retained in memory.
-    /// Entries are small (just the mmap handle); raise for deployments
-    /// with many distinct dSYMs across releases.
+    /// Each entry's cost is the mmap length; combined with
+    /// `native_symcache_cache_bytes_mb` this caps both count and size.
     #[serde(default = "default_native_symcache_cache_size")]
     pub native_symcache_cache_size: usize,
+    /// Aggregate byte budget for retained native SymCache mmap handles.
+    /// Counts mmap length, not resident pages — useful ceiling because a
+    /// dropped Arc<Mmap> is munmapped and its physical pages freed.
+    #[serde(default = "default_native_symcache_cache_bytes_mb")]
+    pub native_symcache_cache_bytes_mb: usize,
 }
 
 impl Default for SymbolicationConfig {
     fn default() -> Self {
         Self {
             source_map_cache_size: default_source_map_cache_size(),
+            source_map_cache_bytes_mb: default_source_map_cache_bytes_mb(),
             release_files_cache_size: default_release_files_cache_size(),
             native_symcache_cache_size: default_native_symcache_cache_size(),
+            native_symcache_cache_bytes_mb: default_native_symcache_cache_bytes_mb(),
         }
     }
 }
@@ -123,11 +136,20 @@ impl Default for SymbolicationConfig {
 fn default_source_map_cache_size() -> usize {
     64
 }
+fn default_source_map_cache_bytes_mb() -> usize {
+    // Budget is measured in raw input bytes. The parsed `SourceMap` form
+    // roughly doubles that in heap (sources + sourcesContent + token
+    // tables), so 32 MB of input translates to ~60–80 MB of retained heap.
+    32
+}
 fn default_release_files_cache_size() -> usize {
     32
 }
 fn default_native_symcache_cache_size() -> usize {
     64
+}
+fn default_native_symcache_cache_bytes_mb() -> usize {
+    256
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

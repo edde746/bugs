@@ -11,12 +11,19 @@ use crate::config::SymbolicationConfig;
 use crate::db::DbPool;
 use crate::models::release::ReleaseFile;
 use crate::sentry_protocol::types::SentryEvent;
+use crate::util::byte_capped_lru::ByteCappedLru;
 
 // Initial capacities — intentionally small. `configure_caches` runs once
 // at startup to resize these to the user's configured values before any
-// envelopes are processed.
-static SM_CACHE: Lazy<Mutex<LruCache<String, Arc<SourceMap>>>> =
-    Lazy::new(|| Mutex::new(LruCache::new(NonZeroUsize::new(64).unwrap())));
+// envelopes are processed. The SM cache is byte-capped because parsed
+// SourceMaps can be several MB each — a pure entry-count cap let a
+// handful of large bundles pin 180+ MB of heap (see repro in phase 2).
+static SM_CACHE: Lazy<Mutex<ByteCappedLru<String, Arc<SourceMap>>>> = Lazy::new(|| {
+    Mutex::new(ByteCappedLru::new(
+        NonZeroUsize::new(64).unwrap(),
+        32 * 1024 * 1024,
+    ))
+});
 
 /// Cache release file lookups to avoid repeated DB queries for the same release version.
 static RELEASE_FILES_CACHE: Lazy<Mutex<LruCache<String, Arc<Vec<ReleaseFile>>>>> =
@@ -28,16 +35,40 @@ static RELEASE_FILES_CACHE: Lazy<Mutex<LruCache<String, Arc<Vec<ReleaseFile>>>>>
 /// than panicking.
 pub fn configure_caches(cfg: &SymbolicationConfig) {
     let sm_cap = NonZeroUsize::new(cfg.source_map_cache_size.max(1)).expect("max(1) is non-zero");
+    let sm_bytes = cfg.source_map_cache_bytes_mb.max(1) * 1024 * 1024;
     let files_cap =
         NonZeroUsize::new(cfg.release_files_cache_size.max(1)).expect("max(1) is non-zero");
     SM_CACHE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .resize(sm_cap);
+        .resize(sm_cap, sm_bytes);
     RELEASE_FILES_CACHE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .resize(files_cap);
+}
+
+/// Drop the cached release-file list for `version` so the next
+/// symbolication attempt re-queries the DB. Must be called after every
+/// `release_files` upsert — otherwise an empty-cache entry from a
+/// symbolication attempt that ran before any files were uploaded pins
+/// "no files" for the life of the process.
+pub fn invalidate_release_files(version: &str) {
+    RELEASE_FILES_CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .pop(&version.to_string());
+}
+
+/// Drop the parsed `SourceMap` cached at `file_path`. Uploading a new
+/// artifact to the same release+name overwrites the on-disk file but
+/// leaves the old parsed form in memory; without this the worker keeps
+/// symbolicating against stale source maps until LRU eviction.
+pub fn invalidate_source_map_path(file_path: &str) {
+    SM_CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .pop(&file_path.to_string());
 }
 
 /// Result of attempting to symbolicate an event. Used by the worker to
@@ -259,13 +290,17 @@ async fn load_source_map(
     // Check cache first
     {
         let mut cache = SM_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(sm) = cache.get(file_path) {
+        if let Some(sm) = cache.get(&file_path.to_string()) {
             return Ok(Arc::clone(sm));
         }
     }
 
     // Read from disk
     let data = tokio::fs::read(file_path).await?;
+    // Charge the cache by input bytes — a reasonable proxy for the
+    // parsed SourceMap's heap footprint (sources + sourcesContent
+    // dominate, and both are retained in the parsed form).
+    let bytes = data.len();
 
     // Parse source map (blocking operation, use spawn_blocking)
     let sm = tokio::task::spawn_blocking(move || SourceMap::from_reader(&data[..])).await??;
@@ -275,7 +310,7 @@ async fn load_source_map(
     // Store in cache
     {
         let mut cache = SM_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-        cache.put(file_path.to_string(), Arc::clone(&sm));
+        cache.put(file_path.to_string(), Arc::clone(&sm), bytes);
     }
 
     Ok(sm)

@@ -9,7 +9,6 @@
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
-use lru::LruCache;
 use memmap2::Mmap;
 use once_cell::sync::Lazy;
 use symbolic::common::Name;
@@ -20,6 +19,7 @@ use tracing::warn;
 use crate::config::SymbolicationConfig;
 use crate::db::DbPool;
 use crate::sentry_protocol::types::{SentryEvent, StackFrame};
+use crate::util::byte_capped_lru::ByteCappedLru;
 use crate::util::id::normalize_debug_id;
 
 /// Outcome of a native-symbolication attempt. Shape parallels
@@ -39,19 +39,26 @@ pub enum NativeSymbolicationOutcome {
     MissingMap,
 }
 
-/// file_path → mmap. Invalidated explicitly on upload via
-/// `invalidate_symcache_path`; atomic rename-over means an unevicted
-/// entry would otherwise keep mapping the replaced inode's stale bytes.
-type NativeCache = LruCache<String, Arc<Mmap>>;
-static NATIVE_CACHE: Lazy<Mutex<NativeCache>> =
-    Lazy::new(|| Mutex::new(LruCache::new(NonZeroUsize::new(64).unwrap())));
+/// file_path → mmap. Byte-capped because an mmap handle's "cost" is its
+/// length in bytes (faulted pages count toward RSS on access); a pure
+/// entry-count cap would let a handful of large dSYMs map hundreds of
+/// MB. Invalidated explicitly on upload via `invalidate_symcache_path`;
+/// atomic rename-over means an unevicted entry would otherwise keep
+/// mapping the replaced inode's stale bytes.
+static NATIVE_CACHE: Lazy<Mutex<ByteCappedLru<String, Arc<Mmap>>>> = Lazy::new(|| {
+    Mutex::new(ByteCappedLru::new(
+        NonZeroUsize::new(64).unwrap(),
+        256 * 1024 * 1024,
+    ))
+});
 
 pub fn configure_cache(cfg: &SymbolicationConfig) {
     let cap = NonZeroUsize::new(cfg.native_symcache_cache_size.max(1)).expect("max(1) is non-zero");
+    let bytes = cfg.native_symcache_cache_bytes_mb.max(1) * 1024 * 1024;
     NATIVE_CACHE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .resize(cap);
+        .resize(cap, bytes);
 }
 
 /// Drop any mmap cached at `file_path`. The upload handler calls this
@@ -61,7 +68,7 @@ pub fn invalidate_symcache_path(file_path: &str) {
     NATIVE_CACHE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .pop(file_path);
+        .pop(&file_path.to_string());
 }
 
 /// Parsed image from `debug_meta.images[*]`.
@@ -354,18 +361,20 @@ fn get_mmap(file_path: &str) -> Option<Arc<Mmap>> {
     if let Some(cached) = NATIVE_CACHE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .get(file_path)
-        .cloned()
+        .get(&file_path.to_string())
+        .map(Arc::clone)
     {
         return Some(cached);
     }
 
     let file = std::fs::File::open(file_path).ok()?;
     let mmap = unsafe { Mmap::map(&file).ok()? };
+    let bytes = mmap.len();
     let arc = Arc::new(mmap);
-    NATIVE_CACHE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .put(file_path.to_string(), arc.clone());
+    NATIVE_CACHE.lock().unwrap_or_else(|e| e.into_inner()).put(
+        file_path.to_string(),
+        arc.clone(),
+        bytes,
+    );
     Some(arc)
 }

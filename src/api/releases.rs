@@ -399,6 +399,13 @@ async fn upload_release_file(
         (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
     })?;
 
+    // Invalidate both symbolication caches so the worker sees the new
+    // file on its next event: the release-level list (empty-list cache
+    // entries would otherwise persist forever) and, for re-uploads, the
+    // parsed source map at the same on-disk path.
+    crate::worker::symbolication::invalidate_release_files(&version);
+    crate::worker::symbolication::invalidate_source_map_path(&file_path);
+
     Ok((StatusCode::CREATED, Json(release_file)))
 }
 
