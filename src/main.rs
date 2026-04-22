@@ -1,4 +1,3 @@
-use axum::extract::DefaultBodyLimit;
 use axum::http::header;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -70,21 +69,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rate_limiter: bugs::ingest::abuse::RateLimiter::new(),
     };
 
-    // Raise the per-request body cap to the configured ingest size.
-    // axum's default is 2 MiB, which silently truncates the Bytes/Multipart
-    // extractors — the handler-level size checks (max_raw_request_bytes,
-    // max_attachment_bytes) never fire because the extractor has already
-    // rejected the request. Multipart is especially opaque: the client
-    // sees a bare "Error parsing multipart/form-data request".
-    let max_body = config
-        .ingest
-        .max_raw_request_bytes
-        .max(config.ingest.max_attachment_bytes)
-        .max(config.ingest.max_envelope_bytes);
-
     let app = bugs::api::router(&state)
         .route("/health", axum::routing::get(|| async { "ok" }))
-        .layer(DefaultBodyLimit::max(max_body))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .layer(tower_http::compression::CompressionLayer::new())
         .layer(SetResponseHeaderLayer::overriding(

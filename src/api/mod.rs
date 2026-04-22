@@ -17,7 +17,7 @@ pub mod user_reports;
 use crate::AppState;
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     http::{StatusCode, header},
     middleware,
     response::Response,
@@ -50,11 +50,27 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             admin_auth_check,
-        ));
+        ))
+        // Admin-authenticated uploads (dSYM bundles, release files) can
+        // legitimately exceed the ingest cap. Per-file ceilings are still
+        // enforced in the handlers via `max_attachment_bytes`.
+        .layer(DefaultBodyLimit::disable());
+
+    // Scope the ingest body cap to the ingest router only. axum's default
+    // is 2 MiB, which silently truncates the Bytes/Multipart extractors —
+    // the handler-level size checks (max_raw_request_bytes,
+    // max_attachment_bytes) never fire because the extractor has already
+    // rejected the request. Multipart is especially opaque: the client
+    // sees a bare "Error parsing multipart/form-data request".
+    let ingest_body_limit = state
+        .config
+        .ingest
+        .max_raw_request_bytes
+        .max(state.config.ingest.max_envelope_bytes);
 
     Router::new()
         .merge(health_routes)
-        .merge(ingest::routes())
+        .merge(ingest::routes().layer(DefaultBodyLimit::max(ingest_body_limit)))
         .merge(auth_routes)
         .merge(management_routes)
         .merge(frontend::routes())
