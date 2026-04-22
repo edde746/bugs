@@ -1,4 +1,4 @@
-import { createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, For, Show } from "solid-js";
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconChevronRight from "~icons/lucide/chevron-right";
 import Button from "~/components/ui/Button";
@@ -136,6 +136,19 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
               !!frame.context_line ||
               (frame.pre_context && frame.pre_context.length > 0) ||
               (frame.post_context && frame.post_context.length > 0);
+            const image = createMemo(() => findImage(frame, props.images));
+            const hasDebugInfo = () => {
+              const img = image();
+              return !!(
+                frame.instruction_addr ||
+                frame.image_addr ||
+                img?.debug_id ||
+                img?.code_id ||
+                img?.code_file ||
+                img?.arch
+              );
+            };
+            const isExpandable = () => hasContext() || hasDebugInfo();
             const frameName = () => getFrameName(frame);
             const frameLocation = () => getFrameLocation(frame);
 
@@ -157,7 +170,7 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
 
             return (
               <div class="stacktrace__frame" data-in-app={frame.in_app ?? false}>
-                <Show when={hasContext()} fallback={
+                <Show when={isExpandable()} fallback={
                   <div class="stacktrace__frame-btn stacktrace__frame-btn--static">
                     <span class="stacktrace__fn-name">
                       {frameName()}
@@ -183,40 +196,6 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
                     </span>
                     {frameTags()}
                   </button>
-                </Show>
-                <Show when={frame.instruction_addr}>
-                  {(() => {
-                    const img = findImage(frame, props.images);
-                    return (
-                      <details class="stacktrace__debug-info">
-                        <summary>Debug info</summary>
-                        <dl>
-                          <dt>instruction_addr</dt>
-                          <dd><code>{frame.instruction_addr}</code></dd>
-                          <Show when={frame.image_addr ?? img?.image_addr}>
-                            <dt>image_addr</dt>
-                            <dd><code>{String(frame.image_addr ?? img?.image_addr)}</code></dd>
-                          </Show>
-                          <Show when={img?.debug_id}>
-                            <dt>debug_id</dt>
-                            <dd><code>{img!.debug_id}</code></dd>
-                          </Show>
-                          <Show when={img?.code_id}>
-                            <dt>code_id</dt>
-                            <dd><code>{img!.code_id}</code></dd>
-                          </Show>
-                          <Show when={img?.arch}>
-                            <dt>arch</dt>
-                            <dd>{img!.arch}</dd>
-                          </Show>
-                          <Show when={img?.code_file}>
-                            <dt>code_file</dt>
-                            <dd><code>{img!.code_file}</code></dd>
-                          </Show>
-                        </dl>
-                      </details>
-                    );
-                  })()}
                 </Show>
                 <Show when={isExpanded() && hasContext()}>
                   <div class="stacktrace__context">
@@ -266,6 +245,34 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
                       </For>
                     </pre>
                   </div>
+                </Show>
+                <Show when={isExpanded() && hasDebugInfo()}>
+                  <dl class="stacktrace__debug-info">
+                    <Show when={frame.instruction_addr}>
+                      <dt>instruction_addr</dt>
+                      <dd><code>{frame.instruction_addr}</code></dd>
+                    </Show>
+                    <Show when={frame.image_addr ?? image()?.image_addr}>
+                      <dt>image_addr</dt>
+                      <dd><code>{String(frame.image_addr ?? image()?.image_addr)}</code></dd>
+                    </Show>
+                    <Show when={image()?.debug_id}>
+                      <dt>debug_id</dt>
+                      <dd><code>{image()!.debug_id}</code></dd>
+                    </Show>
+                    <Show when={image()?.code_id}>
+                      <dt>code_id</dt>
+                      <dd><code>{image()!.code_id}</code></dd>
+                    </Show>
+                    <Show when={image()?.arch}>
+                      <dt>arch</dt>
+                      <dd>{image()!.arch}</dd>
+                    </Show>
+                    <Show when={image()?.code_file}>
+                      <dt>code_file</dt>
+                      <dd><code>{image()!.code_file}</code></dd>
+                    </Show>
+                  </dl>
                 </Show>
               </div>
             );

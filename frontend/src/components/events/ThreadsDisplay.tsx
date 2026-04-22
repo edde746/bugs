@@ -1,4 +1,4 @@
-import { createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, For, Show } from "solid-js";
 import StacktraceViewer from "./StacktraceViewer";
 import type { DebugImage, StackFrame } from "./StacktraceViewer";
 import IconChevronDown from "~icons/lucide/chevron-down";
@@ -24,7 +24,7 @@ interface ThreadsDisplayProps {
 }
 
 export default function ThreadsDisplay(props: ThreadsDisplayProps) {
-  const sorted = () => {
+  const sorted = createMemo(() => {
     const threads = [...props.threads];
     threads.sort((a, b) => {
       if (a.crashed && !b.crashed) return -1;
@@ -36,11 +36,12 @@ export default function ThreadsDisplay(props: ThreadsDisplayProps) {
       return 0;
     });
     return threads;
-  };
+  });
 
   const [expandedThreads, setExpandedThreads] = createSignal<Set<number>>(
     new Set(sorted().map((t, i) => (t.crashed || t.current) ? i : -1).filter(i => i >= 0))
   );
+  const [cardExpanded, setCardExpanded] = createSignal(false);
 
   const toggleThread = (index: number) => {
     const current = new Set(expandedThreads());
@@ -54,23 +55,25 @@ export default function ThreadsDisplay(props: ThreadsDisplayProps) {
 
   return (
     <div class="threads">
-      <div class="threads__header">
+      <button
+        classList={{ threads__header: true, "threads__header--open": cardExpanded() }}
+        onClick={() => setCardExpanded(!cardExpanded())}
+      >
+        <span class="threads__toggle-icon">
+          {cardExpanded() ? <IconChevronDown /> : <IconChevronRight />}
+        </span>
         <h3>Threads ({props.threads.length})</h3>
-      </div>
-      <For each={sorted()}>
-        {(thread, index) => {
-          const isExpanded = () => expandedThreads().has(index());
-          const hasFrames = () => thread.stacktrace?.frames && thread.stacktrace.frames.length > 0;
+      </button>
+      <Show when={cardExpanded()}>
+        <For each={sorted()}>
+          {(thread, index) => {
+            const isExpanded = () => expandedThreads().has(index());
+            const hasFrames = () => thread.stacktrace?.frames && thread.stacktrace.frames.length > 0;
+            const hasLocks = () => thread.held_locks && Object.keys(thread.held_locks).length > 0;
+            const canExpand = () => hasFrames() || hasLocks();
 
-          return (
-            <div class="thread" data-crashed={thread.crashed ?? false}>
-              <button
-                class="thread__header"
-                onClick={() => toggleThread(index())}
-              >
-                <span class="thread__toggle-icon">
-                  {isExpanded() ? <IconChevronDown /> : <IconChevronRight />}
-                </span>
+            const threadLabel = () => (
+              <>
                 <span class="thread__name">
                   Thread {thread.id != null ? `#${thread.id}` : ""}{thread.name ? ` — ${thread.name}` : ""}
                 </span>
@@ -89,27 +92,52 @@ export default function ThreadsDisplay(props: ThreadsDisplayProps) {
                 <Show when={!hasFrames()}>
                   <span class="thread__no-frames">no frames</span>
                 </Show>
-              </button>
-              <Show when={isExpanded()}>
-                <Show when={thread.held_locks && Object.keys(thread.held_locks).length > 0}>
-                  <div class="thread__locks">
-                    <For each={Object.values(thread.held_locks!)}>
-                      {(lock) => (
-                        <span class="thread__lock-badge" title={lock.address}>
-                          holds {lock.package_name}.{lock.class_name}
-                        </span>
-                      )}
-                    </For>
+              </>
+            );
+
+            return (
+              <div class="thread" data-crashed={thread.crashed ?? false}>
+                <Show
+                  when={canExpand()}
+                  fallback={
+                    <div class="thread__header thread__header--static">
+                      {threadLabel()}
+                    </div>
+                  }
+                >
+                  <button
+                    class="thread__header"
+                    onClick={() => toggleThread(index())}
+                  >
+                    <span class="thread__toggle-icon">
+                      {isExpanded() ? <IconChevronDown /> : <IconChevronRight />}
+                    </span>
+                    {threadLabel()}
+                  </button>
+                </Show>
+                <Show when={isExpanded() && canExpand()}>
+                  <div class="thread__body">
+                    <Show when={hasLocks()}>
+                      <div class="thread__locks">
+                        <For each={Object.values(thread.held_locks!)}>
+                          {(lock) => (
+                            <span class="thread__lock-badge" title={lock.address}>
+                              holds {lock.package_name}.{lock.class_name}
+                            </span>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                    <Show when={hasFrames()}>
+                      <StacktraceViewer frames={thread.stacktrace!.frames!} images={props.images} />
+                    </Show>
                   </div>
                 </Show>
-                <Show when={hasFrames()}>
-                  <StacktraceViewer frames={thread.stacktrace!.frames!} images={props.images} />
-                </Show>
-              </Show>
-            </div>
-          );
-        }}
-      </For>
+              </div>
+            );
+          }}
+        </For>
+      </Show>
     </div>
   );
 }
