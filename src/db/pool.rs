@@ -64,10 +64,31 @@ impl DbPool {
         // Log SQLite version and check WAL fix
         pool.check_sqlite_version().await;
 
+        // Replay any stale WAL from a previous crashed run before we
+        // start writing. On a clean DB this is a sub-millisecond no-op;
+        // after a crash it can unstick a DB that would otherwise reject
+        // writes as SQLITE_READONLY when migrations later try to modify
+        // the schema.
+        pool.preflight_wal_checkpoint().await;
+
         // Run migrations
         pool.run_migrations().await?;
 
         Ok(pool)
+    }
+
+    async fn preflight_wal_checkpoint(&self) {
+        let result: Result<(i64, i64, i64), _> = sqlx::query_as("PRAGMA wal_checkpoint(TRUNCATE)")
+            .fetch_one(&self.writer)
+            .await;
+        match result {
+            Ok((busy, log, ckpt)) => {
+                info!(busy, log_frames = log, checkpointed = ckpt, "WAL preflight");
+            }
+            Err(e) => {
+                warn!("WAL preflight checkpoint failed: {e}");
+            }
+        }
     }
 
     pub fn writer(&self) -> &SqlitePool {
@@ -178,13 +199,31 @@ impl DbPool {
                 if trimmed.is_empty() {
                     continue;
                 }
-                sqlx::query(trimmed)
-                    .execute(&self.writer)
-                    .await
-                    .map_err(|e| {
+                if let Err(e) = sqlx::query(trimmed).execute(&self.writer).await {
+                    // SQLITE_READONLY (code 8) at migration time usually
+                    // means stale WAL, bad /data permissions, or a full
+                    // disk. The preflight checkpoint above should have
+                    // cleared a stale WAL; if we still can't write,
+                    // surface actionable guidance instead of a bare
+                    // sqlx error.
+                    if is_readonly_error(&e) {
+                        tracing::error!(
+                            migration = version,
+                            statement = %trimmed,
+                            "Migration failed with SQLITE_READONLY. Likely causes: \
+                             (1) /data not writable by container uid 1001 \
+                             — fix: `chown -R 1001:1001 /data`; \
+                             (2) stale WAL from a prior crash \
+                             — fix: stop the container and run \
+                             `sqlite3 /data/bugs.db 'PRAGMA wal_checkpoint(TRUNCATE); VACUUM;'`; \
+                             (3) disk full — fix: free space on the volume. \
+                             Underlying error: {e}"
+                        );
+                    } else {
                         tracing::error!(migration = version, statement = %trimmed, "Migration failed: {e}");
-                        e
-                    })?;
+                    }
+                    return Err(e);
+                }
             }
 
             sqlx::query("INSERT INTO _migrations (version) VALUES (?)")
@@ -201,6 +240,14 @@ impl DbPool {
 
 /// Split SQL text into individual statements, respecting BEGIN...END blocks (triggers).
 /// Trigger statements like `CREATE TRIGGER ... BEGIN ... END;` are kept as one unit.
+fn is_readonly_error(e: &sqlx::Error) -> bool {
+    // sqlx surfaces SQLite primary code 8 (SQLITE_READONLY) in the Display
+    // string. Matching on the string is ugly but avoids pulling in the
+    // sqlite-internals feature just to read the numeric code.
+    let msg = e.to_string();
+    msg.contains("(code: 8)") || msg.contains("readonly database")
+}
+
 fn split_sql_statements(sql: &str) -> Vec<String> {
     let mut statements = Vec::new();
     let mut current = String::new();
