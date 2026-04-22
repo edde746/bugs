@@ -6,11 +6,30 @@ RUN bun install --frozen-lockfile
 COPY frontend/ ./
 RUN bun run build
 
-# Stage 2: Build Rust binary
-FROM rust:1.94-alpine AS rust-builder
+# Stage 2: Cargo-chef base — shared toolchain + cargo-chef install.
 # g++ is required for symbolic-demangle's C++ demangler build script (cc-rs).
+FROM rust:1.94-alpine AS chef
 RUN apk add --no-cache musl-dev sqlite-dev sqlite-static g++
+RUN cargo install cargo-chef --locked
 WORKDIR /app
+
+# Stage 2a: Produce recipe.json describing the dep graph.
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock ./
+COPY src/ ./src/
+RUN cargo chef prepare --recipe-path recipe.json
+
+# Stage 2b: Cook deps — cached until recipe.json changes, so source-only
+# edits skip the ~60-dep recompile (symbolic, sqlx, axum, etc).
+FROM chef AS cacher
+COPY --from=planner /app/recipe.json recipe.json
+ENV LIBSQLITE3_SYS_USE_PKG_CONFIG=1
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# Stage 2c: Build the actual binary using pre-built deps.
+FROM chef AS rust-builder
+COPY --from=cacher /app/target target
+COPY --from=cacher /usr/local/cargo /usr/local/cargo
 COPY Cargo.toml Cargo.lock ./
 COPY src/ ./src/
 COPY migrations/ ./migrations/

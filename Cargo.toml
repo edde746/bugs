@@ -49,3 +49,9 @@ bytes = "1"
 base64 = "0.22"
 thiserror = "2"
 subtle = "2"
+
+[profile.release]
+strip = "symbols"
+
+[profile.dev]
+debug = "line-tables-only"
