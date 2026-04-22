@@ -103,6 +103,11 @@ pub struct SymbolicationConfig {
     /// the DB on the symbolication hot path.
     #[serde(default = "default_release_files_cache_size")]
     pub release_files_cache_size: usize,
+    /// Max number of mmap'd native SymCache files retained in memory.
+    /// Entries are small (just the mmap handle); raise for deployments
+    /// with many distinct dSYMs across releases.
+    #[serde(default = "default_native_symcache_cache_size")]
+    pub native_symcache_cache_size: usize,
 }
 
 impl Default for SymbolicationConfig {
@@ -110,6 +115,7 @@ impl Default for SymbolicationConfig {
         Self {
             source_map_cache_size: default_source_map_cache_size(),
             release_files_cache_size: default_release_files_cache_size(),
+            native_symcache_cache_size: default_native_symcache_cache_size(),
         }
     }
 }
@@ -119,6 +125,9 @@ fn default_source_map_cache_size() -> usize {
 }
 fn default_release_files_cache_size() -> usize {
     32
+}
+fn default_native_symcache_cache_size() -> usize {
+    64
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

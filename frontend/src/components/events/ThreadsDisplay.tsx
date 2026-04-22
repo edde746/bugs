@@ -1,6 +1,6 @@
 import { createSignal, For, Show } from "solid-js";
 import StacktraceViewer from "./StacktraceViewer";
-import type { StackFrame } from "./StacktraceViewer";
+import type { DebugImage, StackFrame } from "./StacktraceViewer";
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconChevronRight from "~icons/lucide/chevron-right";
 
@@ -20,6 +20,7 @@ export interface ThreadValue {
 
 interface ThreadsDisplayProps {
   threads: ThreadValue[];
+  images?: DebugImage[];
 }
 
 export default function ThreadsDisplay(props: ThreadsDisplayProps) {
@@ -102,7 +103,7 @@ export default function ThreadsDisplay(props: ThreadsDisplayProps) {
                   </div>
                 </Show>
                 <Show when={hasFrames()}>
-                  <StacktraceViewer frames={thread.stacktrace!.frames!} />
+                  <StacktraceViewer frames={thread.stacktrace!.frames!} images={props.images} />
                 </Show>
               </Show>
             </div>

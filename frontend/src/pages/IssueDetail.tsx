@@ -133,6 +133,12 @@ export default function IssueDetail() {
     return data.threads.values as ThreadValue[];
   };
 
+  const debugImages = () => {
+    const data = parsedData();
+    const imgs = (data as { debug_meta?: { images?: unknown[] } } | null)?.debug_meta?.images;
+    return Array.isArray(imgs) ? (imgs as import("~/components/events/StacktraceViewer").DebugImage[]) : undefined;
+  };
+
   const sdk = () => {
     const data = parsedData();
     return (data?.sdk ?? null) as { name?: string; version?: string; integrations?: string[]; packages?: Array<{ name: string; version: string }> } | null;
@@ -621,11 +627,11 @@ export default function IssueDetail() {
                     </Show>
 
                     <Show when={exceptions().length > 0}>
-                      <ExceptionDisplay exceptions={exceptions()} />
+                      <ExceptionDisplay exceptions={exceptions()} images={debugImages()} />
                     </Show>
 
                     <Show when={threads().length > 0}>
-                      <ThreadsDisplay threads={threads()} />
+                      <ThreadsDisplay threads={threads()} images={debugImages()} />
                     </Show>
 
                     <Show when={breadcrumbs().length > 0}>

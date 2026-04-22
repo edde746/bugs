@@ -8,7 +8,9 @@ use crate::sentry_protocol::envelope::Envelope;
 use crate::sentry_protocol::types::SentryEvent;
 use crate::util::log::truncate;
 use crate::util::time::{hour_bucket, now_iso};
-use crate::worker::{alerts, fingerprint, indexer, normalizer, symbolication};
+use crate::worker::{
+    alerts, fingerprint, indexer, native_symbolication, normalizer, symbolication,
+};
 
 /// Cap on the length (in chars) of any user-derived string we put through
 /// tracing macros. Big enough to keep real error messages useful, small
@@ -145,10 +147,12 @@ async fn process_inner(
         // 5. Normalize
         normalizer::normalize(&mut event);
 
-        // 6. Symbolicate using source maps. The outcome is persisted on
-        //    the event row so a later release-file upload can identify
-        //    which events need re-symbolication.
-        let sym_outcome =
+        // 6. Symbolicate: JS source maps, then native DIFs. Each path
+        //    mutates `event` in place and returns an outcome; we fold
+        //    both into the single `symbolication_state` column so a
+        //    later release-file / dSYM upload can identify which events
+        //    need re-symbolication.
+        let js_outcome =
             match symbolication::symbolicate_event(&mut event, db, &config.artifacts_dir).await {
                 Ok(outcome) => outcome,
                 Err(e) => {
@@ -160,11 +164,10 @@ async fn process_inner(
                     symbolication::SymbolicationOutcome::NotAttempted
                 }
             };
-        let symbolication_state: Option<&'static str> = match sym_outcome {
-            symbolication::SymbolicationOutcome::NotAttempted => None,
-            symbolication::SymbolicationOutcome::Ok => Some("ok"),
-            symbolication::SymbolicationOutcome::MissingMap => Some("missing_map"),
-        };
+        let native_outcome =
+            native_symbolication::symbolicate_native(&mut event, project_id, db).await;
+        let symbolication_state: Option<&'static str> =
+            combine_outcomes(js_outcome, &native_outcome);
 
         // 7. Compute fingerprint
         let fp = fingerprint::compute_fingerprint(&event);
@@ -566,4 +569,30 @@ async fn process_inner(
     }
 
     Ok(())
+}
+
+/// Fold JS + native symbolication outcomes into the single
+/// `events.symbolication_state` column. Precedence: any successful
+/// resolution → "ok"; else any MissingMap → "missing_map" (eligible
+/// for retry on later upload); else NULL.
+fn combine_outcomes(
+    js: symbolication::SymbolicationOutcome,
+    native: &native_symbolication::NativeSymbolicationOutcome,
+) -> Option<&'static str> {
+    use native_symbolication::NativeSymbolicationOutcome as N;
+    use symbolication::SymbolicationOutcome as J;
+
+    let js_ok = matches!(js, J::Ok);
+    let native_ok = matches!(native, N::Ok { resolved, .. } if *resolved > 0);
+    if js_ok || native_ok {
+        return Some("ok");
+    }
+
+    let js_missing = matches!(js, J::MissingMap);
+    let native_missing = matches!(native, N::MissingMap);
+    if js_missing || native_missing {
+        return Some("missing_map");
+    }
+
+    None
 }

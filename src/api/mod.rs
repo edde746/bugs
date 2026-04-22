@@ -1,6 +1,7 @@
 pub mod admin_auth;
 pub mod alerts;
 pub mod comments;
+pub mod dsyms;
 pub mod events;
 pub mod frontend;
 pub mod ingest;

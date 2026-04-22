@@ -32,6 +32,10 @@ pub fn routes() -> Router<AppState> {
             post(upload_release_file).get(list_release_files),
         )
         .route(
+            "/api/0/projects/{org}/{project}/files/dsyms/",
+            post(crate::api::dsyms::upload_dsym),
+        )
+        .route(
             "/api/0/organizations/{org}/releases/{version}/deploys/",
             get(list_deploys).post(create_deploy),
         )

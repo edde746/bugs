@@ -38,6 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Apply symbolication cache sizing before any envelopes are processed.
     bugs::worker::symbolication::configure_caches(&config.symbolication);
+    bugs::worker::native_symbolication::configure_cache(&config.symbolication);
 
     let (worker_tx, worker_rx) = mpsc::channel::<bugs::worker::WorkerMessage>(10_000);
 

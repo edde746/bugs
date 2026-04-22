@@ -1,6 +1,6 @@
 import { For, Show } from "solid-js";
 import StacktraceViewer from "./StacktraceViewer";
-import type { StackFrame } from "./StacktraceViewer";
+import type { DebugImage, StackFrame } from "./StacktraceViewer";
 
 export interface ExceptionValue {
   type?: string;
@@ -43,6 +43,7 @@ export function formatMechanismDetails(mechanism: NonNullable<ExceptionValue["me
 
 interface ExceptionDisplayProps {
   exceptions: ExceptionValue[];
+  images?: DebugImage[];
 }
 
 export default function ExceptionDisplay(props: ExceptionDisplayProps) {
@@ -78,7 +79,7 @@ export default function ExceptionDisplay(props: ExceptionDisplayProps) {
               </Show>
             </div>
             <Show when={exception.stacktrace?.frames && exception.stacktrace!.frames!.length > 0}>
-              <StacktraceViewer frames={exception.stacktrace!.frames!} />
+              <StacktraceViewer frames={exception.stacktrace!.frames!} images={props.images} />
             </Show>
           </div>
         )}

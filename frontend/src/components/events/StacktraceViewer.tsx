@@ -30,6 +30,42 @@ export interface StackFrame {
   trust?: string;
 }
 
+export interface DebugImage {
+  type?: string;
+  debug_id?: string;
+  code_id?: string;
+  code_file?: string;
+  debug_file?: string;
+  image_addr?: string | number;
+  image_size?: string | number;
+  image_vmaddr?: string | number;
+  arch?: string;
+}
+
+function parseAddr(v: string | number | undefined): number | null {
+  if (v == null) return null;
+  if (typeof v === "number") return v;
+  const s = v.trim().replace(/^0[xX]/, "");
+  const n = Number.parseInt(s, 16);
+  return Number.isFinite(n) ? n : null;
+}
+
+function findImage(
+  frame: StackFrame,
+  images: DebugImage[] | undefined,
+): DebugImage | null {
+  if (!images || images.length === 0) return null;
+  const iaddr = parseAddr(frame.instruction_addr);
+  if (iaddr == null) return null;
+  for (const img of images) {
+    const base = parseAddr(img.image_addr);
+    const size = parseAddr(img.image_size) ?? 0;
+    if (base == null) continue;
+    if (iaddr >= base && (size === 0 || iaddr < base + size)) return img;
+  }
+  return null;
+}
+
 export function getFrameName(frame: StackFrame): string {
   return frame.function ?? frame.instruction_addr ?? "<anonymous>";
 }
@@ -48,6 +84,7 @@ export function getFrameLocation(frame: StackFrame): string {
 
 interface StacktraceViewerProps {
   frames: StackFrame[];
+  images?: DebugImage[];
 }
 
 export default function StacktraceViewer(props: StacktraceViewerProps) {
@@ -146,6 +183,40 @@ export default function StacktraceViewer(props: StacktraceViewerProps) {
                     </span>
                     {frameTags()}
                   </button>
+                </Show>
+                <Show when={frame.instruction_addr}>
+                  {(() => {
+                    const img = findImage(frame, props.images);
+                    return (
+                      <details class="stacktrace__debug-info">
+                        <summary>Debug info</summary>
+                        <dl>
+                          <dt>instruction_addr</dt>
+                          <dd><code>{frame.instruction_addr}</code></dd>
+                          <Show when={frame.image_addr ?? img?.image_addr}>
+                            <dt>image_addr</dt>
+                            <dd><code>{String(frame.image_addr ?? img?.image_addr)}</code></dd>
+                          </Show>
+                          <Show when={img?.debug_id}>
+                            <dt>debug_id</dt>
+                            <dd><code>{img!.debug_id}</code></dd>
+                          </Show>
+                          <Show when={img?.code_id}>
+                            <dt>code_id</dt>
+                            <dd><code>{img!.code_id}</code></dd>
+                          </Show>
+                          <Show when={img?.arch}>
+                            <dt>arch</dt>
+                            <dd>{img!.arch}</dd>
+                          </Show>
+                          <Show when={img?.code_file}>
+                            <dt>code_file</dt>
+                            <dd><code>{img!.code_file}</code></dd>
+                          </Show>
+                        </dl>
+                      </details>
+                    );
+                  })()}
                 </Show>
                 <Show when={isExpanded() && hasContext()}>
                   <div class="stacktrace__context">
