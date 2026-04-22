@@ -431,13 +431,15 @@ async fn process_inner(
                 .unwrap_or("")
                 .to_string();
 
-            // Calculate duration from start_timestamp and timestamp (both in seconds as f64)
+            // Calculate duration from start_timestamp and timestamp (both in seconds as f64).
+            // Clamp to zero: clock skew or a missing timestamp (unwrap_or(0.0)) can make
+            // end_ts < start_ts, which poisons MIN/SUM aggregates and percentile sorts.
             let start_ts = txn
                 .get("start_timestamp")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.0);
             let end_ts = txn.get("timestamp").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let duration_ms = (end_ts - start_ts) * 1000.0;
+            let duration_ms = (end_ts - start_ts).max(0.0) * 1000.0;
 
             let timestamp_str = txn
                 .get("timestamp")
