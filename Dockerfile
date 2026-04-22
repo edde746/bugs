@@ -8,7 +8,8 @@ RUN bun run build
 
 # Stage 2: Build Rust binary
 FROM rust:1.94-alpine AS rust-builder
-RUN apk add --no-cache musl-dev sqlite-dev sqlite-static
+# g++ is required for symbolic-demangle's C++ demangler build script (cc-rs).
+RUN apk add --no-cache musl-dev sqlite-dev sqlite-static g++
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src/ ./src/
