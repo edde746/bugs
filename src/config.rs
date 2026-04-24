@@ -28,6 +28,8 @@ pub struct Config {
     pub symbolication: SymbolicationConfig,
     #[serde(default)]
     pub email: EmailConfig,
+    #[serde(default)]
+    pub uploads: UploadsConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -70,8 +72,6 @@ pub struct IngestConfig {
     pub max_envelope_bytes: usize,
     #[serde(default = "default_max_event_item_bytes")]
     pub max_event_item_bytes: usize,
-    #[serde(default = "default_max_attachment_bytes")]
-    pub max_attachment_bytes: usize,
     #[serde(default = "default_max_items_per_envelope")]
     pub max_items_per_envelope: usize,
     #[serde(default = "default_max_tag_values_per_key")]
@@ -84,7 +84,6 @@ impl Default for IngestConfig {
             max_raw_request_bytes: default_max_raw_request_bytes(),
             max_envelope_bytes: default_max_envelope_bytes(),
             max_event_item_bytes: default_max_event_item_bytes(),
-            max_attachment_bytes: default_max_attachment_bytes(),
             max_items_per_envelope: default_max_items_per_envelope(),
             max_tag_values_per_key: default_max_tag_values_per_key(),
         }
@@ -150,6 +149,29 @@ fn default_native_symcache_cache_size() -> usize {
 }
 fn default_native_symcache_cache_bytes_mb() -> usize {
     256
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UploadsConfig {
+    /// Ceiling for admin-authenticated uploads (dSYMs, release artifacts).
+    /// The admin auth gate means we trust the caller; this is a sanity
+    /// bound against a corrupt archive or runaway gzip, not an abuse
+    /// defense. Applied both to the raw upload and to each entry inside a
+    /// zipped dSYM bundle.
+    #[serde(default = "default_uploads_max_bytes")]
+    pub max_bytes: usize,
+}
+
+impl Default for UploadsConfig {
+    fn default() -> Self {
+        Self {
+            max_bytes: default_uploads_max_bytes(),
+        }
+    }
+}
+
+fn default_uploads_max_bytes() -> usize {
+    2 * 1024 * 1024 * 1024
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -220,9 +242,6 @@ fn default_max_envelope_bytes() -> usize {
 fn default_max_event_item_bytes() -> usize {
     1024 * 1024
 }
-fn default_max_attachment_bytes() -> usize {
-    10 * 1024 * 1024
-}
 fn default_max_items_per_envelope() -> usize {
     100
 }
@@ -254,6 +273,7 @@ impl Default for Config {
             ingest: IngestConfig::default(),
             symbolication: SymbolicationConfig::default(),
             email: EmailConfig::default(),
+            uploads: UploadsConfig::default(),
         }
     }
 }

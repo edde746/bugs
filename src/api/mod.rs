@@ -53,13 +53,13 @@ pub fn router(state: &AppState) -> Router<AppState> {
         ))
         // Admin-authenticated uploads (dSYM bundles, release files) can
         // legitimately exceed the ingest cap. Per-file ceilings are still
-        // enforced in the handlers via `max_attachment_bytes`.
+        // enforced in the handlers via `uploads.max_bytes`.
         .layer(DefaultBodyLimit::disable());
 
     // Scope the ingest body cap to the ingest router only. axum's default
     // is 2 MiB, which silently truncates the Bytes/Multipart extractors —
     // the handler-level size checks (max_raw_request_bytes,
-    // max_attachment_bytes) never fire because the extractor has already
+    // max_envelope_bytes) never fire because the extractor has already
     // rejected the request. Multipart is especially opaque: the client
     // sees a bare "Error parsing multipart/form-data request".
     let ingest_body_limit = state

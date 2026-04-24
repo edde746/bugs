@@ -300,9 +300,9 @@ async fn upload_release_file(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // Decompress if gzipped (capped to defeat decompression bombs)
-    let max_attachment = state.config.ingest.max_attachment_bytes;
+    let max_upload = state.config.uploads.max_bytes;
     let content = if file_content.len() >= 2 && file_content[0] == 0x1f && file_content[1] == 0x8b {
-        decompress_gzip_capped(&file_content, max_attachment).map_err(|e| match e {
+        decompress_gzip_capped(&file_content, max_upload).map_err(|e| match e {
             DecompressError::SizeExceeded => (
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "Decompressed artifact too large".into(),
@@ -312,7 +312,7 @@ async fn upload_release_file(
             }
         })?
     } else {
-        if file_content.len() > max_attachment {
+        if file_content.len() > max_upload {
             return Err((StatusCode::PAYLOAD_TOO_LARGE, "Artifact too large".into()));
         }
         file_content

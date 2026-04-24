@@ -96,8 +96,13 @@ Configuration is loaded from (highest precedence first):
 | `BUGS_INGEST__MAX_RAW_REQUEST_BYTES` | `20 MB` | Max raw request body |
 | `BUGS_INGEST__MAX_ENVELOPE_BYTES` | `10 MB` | Max decompressed envelope |
 | `BUGS_INGEST__MAX_EVENT_ITEM_BYTES` | `1 MB` | Max single event item |
-| `BUGS_INGEST__MAX_ATTACHMENT_BYTES` | `10 MB` | Max attachment size |
 | `BUGS_INGEST__MAX_ITEMS_PER_ENVELOPE` | `100` | Max items per envelope |
+
+### Admin upload limits
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BUGS_UPLOADS__MAX_BYTES` | `2 GB` | Max size for admin-authenticated uploads (dSYMs, release artifacts) |
 
 ## Authentication
 

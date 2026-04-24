@@ -104,7 +104,7 @@ pub async fn upload_dsym(
 
     let file_content =
         file_content.ok_or((StatusCode::BAD_REQUEST, "Missing 'file' field".to_string()))?;
-    if file_content.len() > state.config.ingest.max_attachment_bytes {
+    if file_content.len() > state.config.uploads.max_bytes {
         return Err((
             StatusCode::PAYLOAD_TOO_LARGE,
             "Upload too large".to_string(),
@@ -135,7 +135,7 @@ pub async fn upload_dsym(
         None => None,
     };
 
-    let max_bytes = state.config.ingest.max_attachment_bytes;
+    let max_bytes = state.config.uploads.max_bytes;
     let conversion = tokio::task::spawn_blocking(move || convert_upload(file_content, max_bytes))
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -247,7 +247,7 @@ fn convert_upload(
             if declared > max_bytes {
                 out.push(Err(ConversionError {
                     entry: name,
-                    reason: "entry exceeds max_attachment_bytes".to_string(),
+                    reason: "entry exceeds uploads.max_bytes".to_string(),
                 }));
                 continue;
             }
@@ -262,7 +262,7 @@ fn convert_upload(
             if buf.len() > max_bytes {
                 out.push(Err(ConversionError {
                     entry: name,
-                    reason: "entry exceeds max_attachment_bytes".to_string(),
+                    reason: "entry exceeds uploads.max_bytes".to_string(),
                 }));
                 continue;
             }
