@@ -8,6 +8,7 @@
 
 #![cfg(target_os = "macos")]
 
+use std::io::{Cursor, Write};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
@@ -217,6 +218,70 @@ async fn test_native_symbolication_missing_map() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_dsym_zip_upload_extracts_dif() {
+    let fixture = build_fixture();
+
+    let (base_url, _db_path, _handle) = start_test_server().await;
+    let client = reqwest::Client::new();
+    create_project(&client, &base_url, "NativeZip", "native-zip").await;
+
+    let zip_bytes = zip_fixture_dsym(&fixture);
+    let boundary = "----bugs-test-dsym-zip";
+    let body = dsym_upload_body(boundary, "fixture.zip", &zip_bytes);
+
+    let resp = client
+        .post(format!(
+            "{base_url}/api/0/projects/default/native-zip/files/dsyms/"
+        ))
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 201, "zipped dsym upload must succeed");
+    let upload_body: serde_json::Value = resp.json().await.unwrap();
+    let uploaded = upload_body["uploaded"].as_array().expect("uploaded array");
+    assert!(
+        uploaded.iter().any(|entry| entry["debug_id"]
+            .as_str()
+            .is_some_and(|debug_id| debug_id.eq_ignore_ascii_case(&fixture.debug_id))),
+        "uploaded zip should contain fixture debug_id; response: {upload_body}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_dsym_upload_over_limit_returns_413() {
+    let (base_url, _db_path, _handle) = start_test_server_with_upload_limit(Some(4)).await;
+    let client = reqwest::Client::new();
+    create_project(&client, &base_url, "NativeLimit", "native-limit").await;
+
+    let boundary = "----bugs-test-dsym-limit";
+    let body = dsym_upload_body(boundary, "too-large", b"12345");
+    let resp = client
+        .post(format!(
+            "{base_url}/api/0/projects/default/native-limit/files/dsyms/"
+        ))
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 413, "oversized dsym upload must be rejected");
+    let body = resp.text().await.unwrap();
+    assert!(
+        body.contains("Upload too large"),
+        "expected explicit upload limit error, got: {body}"
+    );
+}
+
 // --- Helpers -------------------------------------------------------
 
 struct Fixture {
@@ -310,6 +375,45 @@ fn run(cmd: &[&str]) {
     assert!(status.success(), "{cmd:?} exited {status}");
 }
 
+async fn create_project(client: &reqwest::Client, base_url: &str, name: &str, slug: &str) -> i64 {
+    let project: serde_json::Value = client
+        .post(format!("{base_url}/api/internal/projects"))
+        .json(&serde_json::json!({"name": name, "slug": slug}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    project["id"].as_i64().unwrap()
+}
+
+fn dsym_upload_body(boundary: &str, filename: &str, file_content: &[u8]) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\n\
+             Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n\
+             Content-Type: application/octet-stream\r\n\r\n",
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(file_content);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    body
+}
+
+fn zip_fixture_dsym(fixture: &Fixture) -> Vec<u8> {
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let options =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    zip.start_file("fixture.dSYM/Contents/Resources/DWARF/fixture", options)
+        .unwrap();
+    zip.write_all(&std::fs::read(&fixture.dsym_path).unwrap())
+        .unwrap();
+    zip.finish().unwrap().into_inner()
+}
+
 async fn send_event(
     client: &reqwest::Client,
     base_url: &str,
@@ -368,6 +472,12 @@ use std::sync::atomic::{AtomicU16, Ordering};
 static PORT_COUNTER: AtomicU16 = AtomicU16::new(21000);
 
 async fn start_test_server() -> (String, String, tokio::task::JoinHandle<()>) {
+    start_test_server_with_upload_limit(None).await
+}
+
+async fn start_test_server_with_upload_limit(
+    upload_limit: Option<usize>,
+) -> (String, String, tokio::task::JoinHandle<()>) {
     let port = PORT_COUNTER.fetch_add(1, Ordering::Relaxed);
     let db_path = format!("/tmp/bugs-native-test-{port}.db");
 
@@ -382,12 +492,15 @@ async fn start_test_server() -> (String, String, tokio::task::JoinHandle<()>) {
         let bind_addr = bind_addr.clone();
         let db_path = db_path.clone();
         async move {
-            let config = bugs::config::Config {
+            let mut config = bugs::config::Config {
                 bind_address: bind_addr,
                 database_path: db_path,
                 artifacts_dir: format!("/tmp/bugs-native-test-{port}-artifacts"),
                 ..Default::default()
             };
+            if let Some(upload_limit) = upload_limit {
+                config.uploads.max_bytes = upload_limit;
+            }
             let config = std::sync::Arc::new(config);
 
             let db = bugs::db::DbPool::init(&config).await.unwrap();
