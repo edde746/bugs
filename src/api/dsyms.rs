@@ -8,7 +8,7 @@
 
 use std::{
     fs::File,
-    io::{Read, Seek, SeekFrom, Write},
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 
@@ -27,6 +27,7 @@ use tracing::warn;
 
 use crate::AppState;
 use crate::models::release::Release;
+use crate::util::atomic_fs::write_atomic;
 use crate::util::id::normalize_debug_id;
 use crate::worker::native_symbolication;
 
@@ -480,20 +481,4 @@ fn split_conversion(
         }
     }
     (ok, errs)
-}
-
-async fn write_atomic(dir: &str, target: &str, bytes: Vec<u8>) -> std::io::Result<()> {
-    tokio::fs::create_dir_all(dir).await?;
-    let tmp = format!("{target}.tmp.{}", std::process::id());
-    let tmp_move = tmp.clone();
-    // sync_all blocks on disk flush; must run off the tokio reactor.
-    tokio::task::spawn_blocking(move || -> std::io::Result<()> {
-        let mut f = std::fs::File::create(&tmp_move)?;
-        f.write_all(&bytes)?;
-        f.sync_all()
-    })
-    .await
-    .map_err(std::io::Error::other)??;
-    tokio::fs::rename(&tmp, target).await?;
-    Ok(())
 }

@@ -160,18 +160,61 @@ pub struct UploadsConfig {
     /// zipped dSYM bundle.
     #[serde(default = "default_uploads_max_bytes")]
     pub max_bytes: usize,
+    /// Advertised chunk size for the sentry-cli chunked-upload protocol.
+    /// 8 MiB matches sentry-cli's canonical fixture and is the size the
+    /// client is most-tested at.
+    #[serde(default = "default_chunk_size_mib")]
+    pub chunk_size_mib: usize,
+    /// Max chunks sentry-cli will pack into a single POST. With 8 MiB
+    /// chunks and a 32 MiB request cap, the effective batch is ~4 chunks
+    /// per request after gzip — enough to amortize TLS overhead.
+    #[serde(default = "default_chunks_per_request")]
+    pub chunks_per_request: u64,
+    /// Max body size per chunk POST. Smaller than chunk_size_mib *
+    /// chunks_per_request on purpose: 32 MiB keeps the multipart parser
+    /// well within axum's memory comfort zone.
+    #[serde(default = "default_max_request_size_mib")]
+    pub max_request_size_mib: usize,
+    /// Advertised polling budget. We assemble synchronously and return
+    /// `ok` on the first call, so the client never actually sleeps.
+    #[serde(default = "default_max_wait_secs")]
+    pub max_wait_secs: u64,
+    /// Advertised client-side upload concurrency. axum + SQLite under
+    /// multipart upload is not embarrassingly parallel; 4 is sufficient.
+    #[serde(default = "default_chunk_concurrency")]
+    pub chunk_concurrency: u8,
 }
 
 impl Default for UploadsConfig {
     fn default() -> Self {
         Self {
             max_bytes: default_uploads_max_bytes(),
+            chunk_size_mib: default_chunk_size_mib(),
+            chunks_per_request: default_chunks_per_request(),
+            max_request_size_mib: default_max_request_size_mib(),
+            max_wait_secs: default_max_wait_secs(),
+            chunk_concurrency: default_chunk_concurrency(),
         }
     }
 }
 
 fn default_uploads_max_bytes() -> usize {
     2 * 1024 * 1024 * 1024
+}
+fn default_chunk_size_mib() -> usize {
+    8
+}
+fn default_chunks_per_request() -> u64 {
+    64
+}
+fn default_max_request_size_mib() -> usize {
+    32
+}
+fn default_max_wait_secs() -> u64 {
+    60
+}
+fn default_chunk_concurrency() -> u8 {
+    4
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

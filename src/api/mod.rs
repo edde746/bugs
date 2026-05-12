@@ -1,5 +1,6 @@
 pub mod admin_auth;
 pub mod alerts;
+pub mod chunked_upload;
 pub mod comments;
 pub mod dsyms;
 pub mod events;
@@ -47,6 +48,7 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .merge(comments::routes())
         .merge(user_reports::routes())
         .merge(performance::routes())
+        .merge(chunked_upload::routes())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             admin_auth_check,

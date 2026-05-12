@@ -1,3 +1,4 @@
+pub mod atomic_fs;
 pub mod byte_capped_lru;
 pub mod hash;
 pub mod id;

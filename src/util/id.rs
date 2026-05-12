@@ -22,3 +22,27 @@ pub fn normalize_debug_id(s: &str) -> String {
         .flat_map(|c| c.to_lowercase())
         .collect()
 }
+
+/// Inverse of `normalize_debug_id`: insert UUID hyphens into a 32-hex
+/// debug id. Used when responding to clients that prefer the canonical
+/// 8-4-4-4-12 form (sentry-cli accepts both).
+pub fn hyphenate_debug_id(id: &str) -> String {
+    if id.len() == 32 && id.chars().all(|c| c.is_ascii_hexdigit()) {
+        format!(
+            "{}-{}-{}-{}-{}",
+            &id[0..8],
+            &id[8..12],
+            &id[12..16],
+            &id[16..20],
+            &id[20..32],
+        )
+    } else {
+        id.to_string()
+    }
+}
+
+/// True for 40-character lowercase-or-mixed-case ASCII-hex strings —
+/// the wire format Sentry's chunk-upload protocol uses for SHA1 digests.
+pub fn is_sha1_hex(s: &str) -> bool {
+    s.len() == 40 && s.chars().all(|c| c.is_ascii_hexdigit())
+}
