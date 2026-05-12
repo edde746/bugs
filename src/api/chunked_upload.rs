@@ -210,7 +210,6 @@ struct AssembleEntry {
 #[serde(rename_all = "camelCase")]
 struct AssembleResponse {
     state: AssembleState,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     missing_chunks: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
