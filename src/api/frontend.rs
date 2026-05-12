@@ -1,9 +1,9 @@
 use axum::{
     Json, Router,
     extract::Path,
-    http::{StatusCode, header},
+    http::{StatusCode, Uri, header},
     response::IntoResponse,
-    routing::{any, get},
+    routing::get,
 };
 use rust_embed::Embed;
 use serde_json::json;
@@ -17,19 +17,7 @@ struct Asset;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/assets/{*path}", get(serve_asset))
-        // Unmatched /api/* requests return JSON 404 instead of falling
-        // through to the SPA HTML — sentry-cli (and any other API client)
-        // expects JSON and "200 OK text/html" surfaces as "not a JSON
-        // response" or similar nonsense.
-        .route("/api/{*rest}", any(api_not_found))
         .fallback(get(serve_spa))
-}
-
-async fn api_not_found() -> impl IntoResponse {
-    (
-        StatusCode::NOT_FOUND,
-        Json(json!({ "detail": "not found" })),
-    )
 }
 
 async fn serve_asset(Path(path): Path<String>) -> impl IntoResponse {
@@ -48,7 +36,19 @@ async fn serve_asset(Path(path): Path<String>) -> impl IntoResponse {
     }
 }
 
-async fn serve_spa() -> impl IntoResponse {
+async fn serve_spa(uri: Uri) -> impl IntoResponse {
+    // Unmatched /api/* requests return JSON 404 instead of falling through
+    // to the SPA HTML — sentry-cli (and any other API client) expects JSON
+    // and "200 OK text/html" surfaces as "not a JSON response". Can't use
+    // a `/api/{*rest}` route here because matchit refuses to register a
+    // glob that overlaps existing `/api/{project_id}/...` ingest routes.
+    if uri.path().starts_with("/api/") {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "detail": "not found" })),
+        )
+            .into_response();
+    }
     match Asset::get("index.html") {
         Some(content) => (
             StatusCode::OK,
