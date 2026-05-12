@@ -17,7 +17,26 @@ struct Asset;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/assets/{*path}", get(serve_asset))
-        .fallback(get(serve_spa))
+        .fallback(get(fallback))
+}
+
+/// Catch-all for unmatched routes. Dispatches API paths to a JSON-404
+/// handler and everything else to the SPA shell. A `/api/{*rest}` route
+/// would be cleaner but matchit refuses to register a glob that overlaps
+/// existing `/api/{project_id}/...` ingest routes.
+async fn fallback(uri: Uri) -> axum::response::Response {
+    if uri.path().starts_with("/api/") {
+        api_not_found().await.into_response()
+    } else {
+        serve_spa().await.into_response()
+    }
+}
+
+async fn api_not_found() -> impl IntoResponse {
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({ "detail": "not found" })),
+    )
 }
 
 async fn serve_asset(Path(path): Path<String>) -> impl IntoResponse {
@@ -36,19 +55,7 @@ async fn serve_asset(Path(path): Path<String>) -> impl IntoResponse {
     }
 }
 
-async fn serve_spa(uri: Uri) -> impl IntoResponse {
-    // Unmatched /api/* requests return JSON 404 instead of falling through
-    // to the SPA HTML — sentry-cli (and any other API client) expects JSON
-    // and "200 OK text/html" surfaces as "not a JSON response". Can't use
-    // a `/api/{*rest}` route here because matchit refuses to register a
-    // glob that overlaps existing `/api/{project_id}/...` ingest routes.
-    if uri.path().starts_with("/api/") {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "detail": "not found" })),
-        )
-            .into_response();
-    }
+async fn serve_spa() -> impl IntoResponse {
     match Asset::get("index.html") {
         Some(content) => (
             StatusCode::OK,
