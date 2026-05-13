@@ -45,11 +45,11 @@ fn chunk_path(root: &str, hash: &str) -> PathBuf {
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route(
-            "/api/0/organizations/{org}/chunk-upload/",
+            "/api/0/organizations/{org}/chunk-upload",
             get(chunk_options).post(upload_chunks),
         )
         .route(
-            "/api/0/projects/{org}/{project}/files/difs/assemble/",
+            "/api/0/projects/{org}/{project}/files/difs/assemble",
             post(assemble_difs),
         )
 }

@@ -6,7 +6,8 @@ edition = "2024"
 [dependencies]
 # Web
 axum = { version = "0.8", features = ["multipart", "macros"] }
-tower-http = { version = "0.6", features = ["cors", "compression-gzip", "trace", "set-header"] }
+tower = { version = "0.5", features = ["make"] }
+tower-http = { version = "0.6", features = ["cors", "compression-gzip", "normalize-path", "trace", "set-header"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "fs", "io-util"] }
 
 # Database

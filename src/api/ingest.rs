@@ -118,9 +118,9 @@ async fn project_origin_matchers(
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/api/{project_id}/envelope/", post(ingest_envelope))
-        .route("/api/{project_id}/store/", post(ingest_store))
-        .route("/api/{project_id}/security/", post(ingest_security))
+        .route("/api/{project_id}/envelope", post(ingest_envelope))
+        .route("/api/{project_id}/store", post(ingest_store))
+        .route("/api/{project_id}/security", post(ingest_security))
         .layer(tower_http::cors::CorsLayer::permissive())
 }
 

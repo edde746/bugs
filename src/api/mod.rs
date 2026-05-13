@@ -24,6 +24,12 @@ use axum::{
     response::Response,
     routing::{get, post},
 };
+use tower::make::Shared;
+use tower_http::normalize_path::NormalizePath;
+
+pub fn normalized_make_service<S>(service: S) -> Shared<NormalizePath<S>> {
+    Shared::new(NormalizePath::trim_trailing_slash(service))
+}
 
 pub fn router(state: &AppState) -> Router<AppState> {
     // Public health endpoint — outside auth middleware so container

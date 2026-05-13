@@ -569,6 +569,158 @@ async fn test_artifact_name_path_traversal_rejected() {
     );
 }
 
+#[tokio::test]
+async fn test_sentry_release_routes_and_trailing_slashes() {
+    let (base_url, _handle) = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    let project_resp = client
+        .post(format!("{base_url}/api/internal/projects/"))
+        .json(&serde_json::json!({"name": "Plezy", "slug": "plezy"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(project_resp.status(), 201);
+
+    let version = "plezy@856ac83";
+    let create_resp = client
+        .post(format!("{base_url}/api/0/projects/default/plezy/releases/"))
+        .json(&serde_json::json!({
+            "version": version,
+            "projects": ["plezy"],
+            "dateStarted": "2026-05-13T17:47:50Z"
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = create_resp.status();
+    let body = create_resp.text().await.unwrap();
+    assert_eq!(status, 201, "create release failed: {body}");
+    let release: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(release["version"], version);
+    assert_eq!(release["projects"][0]["slug"], "plezy");
+    assert!(release["dateCreated"].as_str().unwrap().ends_with('Z'));
+
+    let finalize_resp = client
+        .put(format!(
+            "{base_url}/api/0/projects/default/plezy/releases/{version}/"
+        ))
+        .json(&serde_json::json!({
+            "dateReleased": "2026-05-13T17:48:00Z"
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = finalize_resp.status();
+    let body = finalize_resp.text().await.unwrap();
+    assert_eq!(status, 200, "finalize release failed: {body}");
+    let release: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(release["dateReleased"], "2026-05-13T17:48:00Z");
+
+    let commits_resp = client
+        .put(format!(
+            "{base_url}/api/0/organizations/default/releases/{version}"
+        ))
+        .json(&serde_json::json!({
+            "commits": [{"id": "856ac83", "repository": "plezy"}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = commits_resp.status();
+    let body = commits_resp.text().await.unwrap();
+    assert_eq!(status, 200, "set commits failed: {body}");
+
+    let list_resp = client
+        .get(format!("{base_url}/api/0/projects/default/plezy/releases/"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(list_resp.status(), 200);
+    let releases: serde_json::Value = list_resp.json().await.unwrap();
+    assert_eq!(releases.as_array().unwrap().len(), 1);
+
+    let initial_files_resp = client
+        .get(format!(
+            "{base_url}/api/0/projects/default/plezy/releases/{version}/files/"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(initial_files_resp.status(), 200);
+    let files: serde_json::Value = initial_files_resp.json().await.unwrap();
+    assert!(files.as_array().unwrap().is_empty());
+
+    let boundary = "----bugs-release-boundary";
+    let source_map = r#"{"version":3,"sources":["main.dart"],"names":[],"mappings":"AAAA"}"#;
+    let body = format!(
+        "--{b}\r\n\
+         Content-Disposition: form-data; name=\"name\"\r\n\r\n\
+         ~/main.dart.js.map\r\n\
+         --{b}\r\n\
+         Content-Disposition: form-data; name=\"header\"\r\n\r\n\
+         debug-id:abc123\r\n\
+         --{b}\r\n\
+         Content-Disposition: form-data; name=\"file\"; filename=\"main.dart.js.map\"\r\n\
+         Content-Type: application/json\r\n\r\n\
+         {source_map}\r\n\
+         --{b}--\r\n",
+        b = boundary
+    );
+    let upload_resp = client
+        .post(format!(
+            "{base_url}/api/0/projects/default/plezy/releases/{version}/files/"
+        ))
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    let status = upload_resp.status();
+    let body = upload_resp.text().await.unwrap();
+    assert_eq!(status, 201, "upload release file failed: {body}");
+    let artifact: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let file_id = artifact["id"].as_str().unwrap();
+    assert_eq!(artifact["name"], "~/main.dart.js.map");
+    assert!(artifact["sha1"].as_str().unwrap().len() >= 40);
+    assert!(artifact["size"].as_u64().unwrap() > 0);
+    assert_eq!(artifact["headers"]["debug-id"], "abc123");
+
+    let files_resp = client
+        .get(format!(
+            "{base_url}/api/0/projects/default/plezy/releases/{version}/files"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(files_resp.status(), 200);
+    let files: serde_json::Value = files_resp.json().await.unwrap();
+    assert_eq!(files.as_array().unwrap().len(), 1);
+    assert_eq!(files[0]["id"], file_id);
+
+    let delete_resp = client
+        .delete(format!(
+            "{base_url}/api/0/projects/default/plezy/releases/{version}/files/{file_id}/"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(delete_resp.status(), 204);
+
+    let files_resp = client
+        .get(format!(
+            "{base_url}/api/0/projects/default/plezy/releases/{version}/files"
+        ))
+        .send()
+        .await
+        .unwrap();
+    let files: serde_json::Value = files_resp.json().await.unwrap();
+    assert!(files.as_array().unwrap().is_empty());
+}
+
 // --- Test harness ---
 
 use std::sync::atomic::{AtomicU16, Ordering};
@@ -630,7 +782,9 @@ async fn start_test_server() -> (String, tokio::task::JoinHandle<()>) {
             let listener = tokio::net::TcpListener::bind(&config.bind_address)
                 .await
                 .unwrap();
-            axum::serve(listener, app).await.unwrap();
+            axum::serve(listener, bugs::api::normalized_make_service(app))
+                .await
+                .unwrap();
         }
     });
 

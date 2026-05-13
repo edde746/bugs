@@ -535,7 +535,9 @@ async fn start_test_server_with_upload_limit(
             let listener = tokio::net::TcpListener::bind(&config.bind_address)
                 .await
                 .unwrap();
-            axum::serve(listener, app).await.unwrap();
+            axum::serve(listener, bugs::api::normalized_make_service(app))
+                .await
+                .unwrap();
         }
     });
 

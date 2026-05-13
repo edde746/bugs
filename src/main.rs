@@ -107,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(&config.bind_address).await?;
     info!(address = %config.bind_address, "Listening");
 
-    axum::serve(listener, app)
+    axum::serve(listener, bugs::api::normalized_make_service(app))
         .with_graceful_shutdown(async move {
             shutdown_signal().await;
             // Notify background tasks so they begin exiting in parallel with
