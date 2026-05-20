@@ -103,6 +103,7 @@ Configuration is loaded from (highest precedence first):
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BUGS_UPLOADS__MAX_BYTES` | `2 GB` | Max size for admin-authenticated uploads (dSYMs, release artifacts) |
+| `BUGS_UPLOADS__CHUNK_RETENTION_HOURS` | `12` | Hours to keep chunk-upload blobs after last use; active uploads refresh this TTL |
 
 ## Authentication
 

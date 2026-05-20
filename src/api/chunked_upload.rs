@@ -14,7 +14,8 @@
 //! stored as-is at `<artifacts_dir>/sources/<sha1[..2]>/<debug_id>.zip`
 //! instead of dropped into an empty SymCache.
 
-use std::io::{Read, Write};
+use std::collections::HashMap;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use axum::{
@@ -35,12 +36,9 @@ use tracing::warn;
 
 use crate::AppState;
 use crate::util::atomic_fs::{copy_atomic, write_atomic};
+use crate::util::chunk_store::{chunk_path, touch_chunk};
 use crate::util::id::{hyphenate_debug_id, is_sha1_hex, normalize_debug_id};
 use crate::worker::native_symbolication;
-
-fn chunk_path(root: &str, hash: &str) -> PathBuf {
-    PathBuf::from(format!("{root}/{}/{hash}", &hash[..2]))
-}
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -173,13 +171,21 @@ async fn upload_chunks(
             ));
         }
 
-        let target_path = chunk_path(&chunks_root, &actual_hash);
+        let target_path = chunk_path(Path::new(&chunks_root), &actual_hash);
         let target = target_path.to_string_lossy().into_owned();
         let dir = target_path
             .parent()
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|| chunks_root.clone());
-        if !tokio::fs::try_exists(&target).await.unwrap_or(false) {
+        let mut needs_write = !tokio::fs::try_exists(&target).await.unwrap_or(false);
+        if !needs_write {
+            match touch_chunk(&target_path).await {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => needs_write = true,
+                Err(e) => warn!(path = %target, "failed to refresh existing chunk mtime: {e}"),
+            }
+        }
+        if needs_write {
             write_atomic(&dir, &target, decoded).await.map_err(|e| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -261,7 +267,7 @@ async fn assemble_difs(
     };
 
     let chunks_root = format!("{}/chunks", state.config.artifacts_dir);
-    let mut response = std::collections::HashMap::<String, AssembleResponse>::new();
+    let mut response = HashMap::<String, AssembleResponse>::new();
 
     for (checksum, entry) in request {
         if !is_sha1_hex(&checksum) {
@@ -307,10 +313,17 @@ async fn assemble_one(
         if !is_sha1_hex(&lower) {
             return Err(format!("invalid chunk hash: {ch}"));
         }
-        let path = chunk_path(chunks_root, &lower);
+        let path = chunk_path(Path::new(chunks_root), &lower);
         if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
             missing.push(lower);
         } else {
+            if let Err(e) = touch_chunk(&path).await {
+                if e.kind() == io::ErrorKind::NotFound {
+                    missing.push(lower);
+                    continue;
+                }
+                warn!(path = %path.display(), "failed to refresh chunk mtime during assemble: {e}");
+            }
             chunk_paths.push(path);
         }
     }

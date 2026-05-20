@@ -137,6 +137,8 @@ async fn manual_cleanup(
         state.db.writer(),
         state.config.retention_days,
         state.config.envelope_retention_hours,
+        &state.config.artifacts_dir,
+        state.config.uploads.chunk_retention_hours,
     )
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;

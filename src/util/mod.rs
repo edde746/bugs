@@ -1,5 +1,6 @@
 pub mod atomic_fs;
 pub mod byte_capped_lru;
+pub mod chunk_store;
 pub mod hash;
 pub mod id;
 pub mod log;

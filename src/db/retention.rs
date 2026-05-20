@@ -1,13 +1,19 @@
+use std::path::Path;
+
 use sqlx::SqlitePool;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, interval};
 use tracing::{info, warn};
 
+use crate::util::chunk_store::cleanup_stale_chunks;
+
 pub fn spawn_retention_task(
     writer: SqlitePool,
     retention_days: u32,
     envelope_retention_hours: u32,
+    artifacts_dir: String,
+    chunk_retention_hours: u32,
     mut shutdown: watch::Receiver<bool>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -17,7 +23,15 @@ pub fn spawn_retention_task(
                 _ = timer.tick() => {}
                 _ = shutdown.changed() => break,
             }
-            if let Err(e) = run_cleanup(&writer, retention_days, envelope_retention_hours).await {
+            if let Err(e) = run_cleanup(
+                &writer,
+                retention_days,
+                envelope_retention_hours,
+                &artifacts_dir,
+                chunk_retention_hours,
+            )
+            .await
+            {
                 warn!("Retention cleanup failed: {e}");
             }
         }
@@ -29,14 +43,25 @@ pub async fn run_cleanup_now(
     writer: &SqlitePool,
     retention_days: u32,
     envelope_retention_hours: u32,
+    artifacts_dir: &str,
+    chunk_retention_hours: u32,
 ) -> Result<(), sqlx::Error> {
-    run_cleanup(writer, retention_days, envelope_retention_hours).await
+    run_cleanup(
+        writer,
+        retention_days,
+        envelope_retention_hours,
+        artifacts_dir,
+        chunk_retention_hours,
+    )
+    .await
 }
 
 async fn run_cleanup(
     writer: &SqlitePool,
     retention_days: u32,
     envelope_retention_hours: u32,
+    artifacts_dir: &str,
+    chunk_retention_hours: u32,
 ) -> Result<(), sqlx::Error> {
     let event_cutoff = format!("-{retention_days} days");
     let envelope_cutoff = format!("-{envelope_retention_hours} hours");
@@ -77,6 +102,40 @@ async fn run_cleanup(
     sqlx::query("PRAGMA incremental_vacuum(1000)")
         .execute(writer)
         .await?;
+
+    // Best-effort cleanup for sentry-cli chunked uploads. Chunks are
+    // content-addressed and can be shared by concurrent uploads, so active
+    // upload paths renew mtime and this task removes only stale blobs.
+    let chunks_root = Path::new(artifacts_dir).join("chunks");
+    match cleanup_stale_chunks(
+        &chunks_root,
+        Duration::from_secs((chunk_retention_hours.max(1) as u64).saturating_mul(3600)),
+    )
+    .await
+    {
+        Ok(stats) if stats.deleted_files > 0 || stats.removed_dirs > 0 => info!(
+            files = stats.deleted_files,
+            bytes = stats.deleted_bytes,
+            dirs = stats.removed_dirs,
+            "Chunk retention cleanup completed"
+        ),
+        Ok(_) => {}
+        Err(e) => warn!("Chunk retention cleanup failed: {e}"),
+    }
+
+    let checkpoint: Result<(i64, i64, i64), _> = sqlx::query_as("PRAGMA wal_checkpoint(TRUNCATE)")
+        .fetch_one(writer)
+        .await;
+    match checkpoint {
+        Ok((busy, log, checkpointed)) if busy > 0 => warn!(
+            busy,
+            log_frames = log,
+            checkpointed,
+            "Retention WAL checkpoint could not fully truncate"
+        ),
+        Ok(_) => {}
+        Err(e) => warn!("Retention WAL checkpoint failed: {e}"),
+    }
 
     info!(
         envelopes = envelopes_deleted.rows_affected(),

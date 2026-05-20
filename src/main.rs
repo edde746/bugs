@@ -70,6 +70,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         db.writer().clone(),
         config.retention_days,
         config.envelope_retention_hours,
+        config.artifacts_dir.clone(),
+        config.uploads.chunk_retention_hours,
         shutdown_rx.clone(),
     );
 

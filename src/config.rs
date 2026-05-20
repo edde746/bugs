@@ -183,6 +183,11 @@ pub struct UploadsConfig {
     /// multipart upload is not embarrassingly parallel; 4 is sufficient.
     #[serde(default = "default_chunk_concurrency")]
     pub chunk_concurrency: u8,
+    /// How long chunk-upload blobs are kept on disk after last use. Assemble
+    /// requests renew referenced chunks; this TTL is the safety net for
+    /// interrupted uploads and crashed clients.
+    #[serde(default = "default_chunk_retention_hours")]
+    pub chunk_retention_hours: u32,
 }
 
 impl Default for UploadsConfig {
@@ -194,6 +199,7 @@ impl Default for UploadsConfig {
             max_request_size_mib: default_max_request_size_mib(),
             max_wait_secs: default_max_wait_secs(),
             chunk_concurrency: default_chunk_concurrency(),
+            chunk_retention_hours: default_chunk_retention_hours(),
         }
     }
 }
@@ -215,6 +221,9 @@ fn default_max_wait_secs() -> u64 {
 }
 fn default_chunk_concurrency() -> u8 {
     4
+}
+fn default_chunk_retention_hours() -> u32 {
+    12
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
