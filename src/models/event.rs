@@ -56,3 +56,14 @@ pub struct EventSummary {
     pub exception_values: Option<String>,
     pub stacktrace_functions: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct EventAttachment {
+    pub id: i64,
+    pub event_id: i64,
+    pub name: String,
+    pub content_type: Option<String>,
+    pub attachment_type: Option<String>,
+    pub size: i64,
+    pub created_at: String,
+}

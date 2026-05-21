@@ -4,7 +4,7 @@ use crate::api::ingest::decompress_gzip_capped;
 use crate::config::Config;
 use crate::db::DbPool;
 use crate::db::checkpoint::CheckpointManager;
-use crate::sentry_protocol::envelope::Envelope;
+use crate::sentry_protocol::envelope::{Envelope, EnvelopeItem};
 use crate::sentry_protocol::types::SentryEvent;
 use crate::util::log::truncate;
 use crate::util::time::{hour_bucket, now_iso};
@@ -133,6 +133,16 @@ async fn process_inner(
 
     // 3. Parse envelope
     let envelope = Envelope::parse(&body)?;
+    let event_item_count = envelope
+        .items
+        .iter()
+        .filter(|item| item.headers.item_type == "event")
+        .count();
+    let attachment_items: Vec<&EnvelopeItem> = envelope
+        .items
+        .iter()
+        .filter(|item| item.headers.item_type == "attachment")
+        .collect();
 
     // 4. Process each event item
     let mut processed_any = false;
@@ -343,6 +353,13 @@ async fn process_inner(
         .await?;
 
         let event_row_id = event_row.0;
+
+        if !attachment_items.is_empty()
+            && (event_item_count == 1
+                || envelope.headers.event_id.as_deref() == Some(event_id.as_str()))
+        {
+            insert_attachments(db, event_row_id, &attachment_items).await?;
+        }
 
         // 11. Auto-create release record if event has a release string
         if let Some(ref release_str) = release
@@ -568,6 +585,38 @@ async fn process_inner(
             envelope_id,
             "Envelope contained no processable items, skipping"
         );
+    }
+
+    Ok(())
+}
+
+async fn insert_attachments(
+    db: &DbPool,
+    event_row_id: i64,
+    attachments: &[&EnvelopeItem],
+) -> Result<(), sqlx::Error> {
+    for (index, item) in attachments.iter().enumerate() {
+        let name = item
+            .headers
+            .filename
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("attachment-{}", index + 1));
+
+        sqlx::query(
+            "INSERT INTO event_attachments (event_id, name, content_type, attachment_type, size, body) \
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(event_row_id)
+        .bind(&name)
+        .bind(&item.headers.content_type)
+        .bind(&item.headers.attachment_type)
+        .bind(item.payload.len() as i64)
+        .bind(item.payload.as_ref())
+        .execute(db.writer())
+        .await?;
     }
 
     Ok(())

@@ -61,6 +61,16 @@ export interface EventListResponse {
   nextCursor: string | null;
 }
 
+export interface EventAttachment {
+  id: number;
+  event_id: number;
+  name: string;
+  content_type: string | null;
+  attachment_type: string | null;
+  size: number;
+  created_at: string;
+}
+
 export interface SearchResponse {
   results: Event[];
 }

@@ -18,6 +18,7 @@ import BreadcrumbsTimeline from "./BreadcrumbsTimeline";
 import ContextPanels from "./ContextPanels";
 import TagsTable from "./TagsTable";
 import ThreadsDisplay from "./ThreadsDisplay";
+import AttachmentsPanel from "./AttachmentsPanel";
 import IconEye from "~icons/lucide/eye";
 import IconEyeOff from "~icons/lucide/eye-off";
 import type { ExceptionValue } from "./ExceptionDisplay";
@@ -105,6 +106,8 @@ export default function EventDetailView(props: EventDetailViewProps) {
       </Show>
 
       <ContextPanels contexts={contexts()} request={request()} user={user()} />
+
+      <AttachmentsPanel eventId={props.event.id} />
 
       <div class="raw-json">
         <button

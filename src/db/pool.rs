@@ -186,6 +186,7 @@ impl DbPool {
             include_str!("../../migrations/015_additional_indexes.sql"),
             include_str!("../../migrations/016_symbolication_state.sql"),
             include_str!("../../migrations/017_debug_ids_project_and_arch.sql"),
+            include_str!("../../migrations/018_event_attachments.sql"),
         ];
 
         for (i, sql) in migrations.iter().enumerate() {

@@ -63,6 +63,32 @@ export async function apiRequest<T>(
   return response.json();
 }
 
+async function apiRaw(
+  path: string,
+  options: ApiRequestOptions = {},
+): Promise<Response> {
+  const token = localStorage.getItem("bugs_admin_token");
+  const headers: Record<string, string> = {
+    ...(options.headers as Record<string, string>),
+  };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const response = await fetch(`${BASE_URL}${path}`, {
+    ...options,
+    headers,
+    signal: options.signal,
+  });
+  if (!response.ok) {
+    if (response.status === 401) {
+      triggerLogout();
+      throw new ApiError(response.status, response.statusText, null);
+    }
+    const body = await response.json().catch(() => null);
+    throw new ApiError(response.status, response.statusText, body);
+  }
+  return response;
+}
+
 export const api = {
   get: <T>(path: string, signal?: AbortSignal) =>
     apiRequest<T>(path, { signal }),
@@ -72,4 +98,8 @@ export const api = {
     apiRequest<T>(path, { method: "PUT", body: JSON.stringify(body), signal }),
   delete: <T>(path: string, signal?: AbortSignal) =>
     apiRequest<T>(path, { method: "DELETE", signal }),
+  text: async (path: string, signal?: AbortSignal) =>
+    (await apiRaw(path, { signal })).text(),
+  blob: async (path: string, signal?: AbortSignal) =>
+    (await apiRaw(path, { signal })).blob(),
 };

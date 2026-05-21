@@ -1578,6 +1578,57 @@ label.field-label--sm {
   word-break: break-all;
 }
 
+.attachments .card__header svg {
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-secondary);
+}
+
+.attachments__table td {
+  vertical-align: top;
+}
+
+.attachments__name {
+  max-width: 360px;
+  overflow-wrap: anywhere;
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+}
+
+.attachments__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.attachment-preview {
+  border-top: 1px solid var(--color-border);
+}
+
+.attachment-preview__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 16px;
+  background: var(--color-surface-1);
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.attachment-preview__content {
+  max-height: 420px;
+  overflow: auto;
+  padding: 16px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--color-text-primary);
+  background: var(--color-surface-0);
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ===================================================================
    PAGE UTILITIES
    =================================================================== */

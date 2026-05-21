@@ -5,7 +5,20 @@ import { api } from "~/api/client";
 import { queryKeys } from "~/queries/keys";
 import type { Issue, Event as SentryEvent, UpdateIssueInput, EventListResponse, IssueComment, IssueActivity } from "~/lib/sentry-types";
 import { relativeTime, formatNumber, displayValue } from "~/lib/formatters";
-import { parseEventData } from "~/lib/eventData";
+import {
+  getBreadcrumbs,
+  getContexts,
+  getExceptions,
+  getExtra,
+  getFingerprint,
+  getMessage,
+  getRequest,
+  getSdk,
+  getTags,
+  getThreads,
+  getUser,
+  parseEventData,
+} from "~/lib/eventData";
 import { STATUS_LABELS } from "~/lib/constants";
 import Badge from "~/components/ui/Badge";
 import Button from "~/components/ui/Button";
@@ -16,6 +29,7 @@ import BreadcrumbsTimeline from "~/components/events/BreadcrumbsTimeline";
 import ThreadsDisplay from "~/components/events/ThreadsDisplay";
 import ContextPanels from "~/components/events/ContextPanels";
 import TagsTable from "~/components/events/TagsTable";
+import AttachmentsPanel from "~/components/events/AttachmentsPanel";
 import CopyButton from "~/components/ui/CopyButton";
 import IconArrowLeft from "~icons/lucide/arrow-left";
 import IconArrowRight from "~icons/lucide/arrow-right";
@@ -87,50 +101,31 @@ export default function IssueDetail() {
   const parseOk = () => parseResult().ok;
 
   const exceptions = () => {
-    const data = parsedData();
-    if (!data) return [];
-    if (data.exception?.values) return data.exception.values;
-    if (data.exceptions) return data.exceptions;
-    return [];
+    return getExceptions(parseResult()) as ExceptionValue[];
   };
 
   const breadcrumbs = () => {
-    const data = parsedData();
-    if (!data) return [];
-    if (data.breadcrumbs?.values) return data.breadcrumbs.values;
-    if (Array.isArray(data.breadcrumbs)) return data.breadcrumbs;
-    return [];
+    return getBreadcrumbs(parseResult()) as Breadcrumb[];
   };
 
   const contexts = () => {
-    const data = parsedData();
-    return data?.contexts ?? {};
+    return getContexts(parseResult());
   };
 
   const request = () => {
-    const data = parsedData();
-    return data?.request ?? null;
+    return getRequest(parseResult());
   };
 
   const user = () => {
-    const data = parsedData();
-    return data?.user ?? null;
+    return getUser(parseResult());
   };
 
   const tags = () => {
-    const data = parsedData();
-    if (!data?.tags) return [];
-    if (Array.isArray(data.tags)) return data.tags;
-    return Object.entries(data.tags).map(([key, value]) => ({
-      key,
-      value: String(value),
-    }));
+    return getTags(parseResult());
   };
 
   const threads = () => {
-    const data = parsedData();
-    if (!data?.threads?.values) return [];
-    return data.threads.values as ThreadValue[];
+    return getThreads(parseResult()) as ThreadValue[];
   };
 
   const debugImages = () => {
@@ -140,26 +135,19 @@ export default function IssueDetail() {
   };
 
   const sdk = () => {
-    const data = parsedData();
-    return (data?.sdk ?? null) as { name?: string; version?: string; integrations?: string[]; packages?: Array<{ name: string; version: string }> } | null;
+    return getSdk(parseResult());
   };
 
   const fingerprint = () => {
-    const data = parsedData();
-    return (data?.fingerprint as string[] | null) ?? [];
+    return getFingerprint(parseResult());
   };
 
   const extra = () => {
-    const data = parsedData();
-    return (data?.extra ?? null) as Record<string, unknown> | null;
+    return getExtra(parseResult());
   };
 
   const eventMessage = () => {
-    const data = parsedData();
-    if (data?.message) return String(data.message);
-    if (data?.logentry?.formatted) return String(data.logentry.formatted);
-    if (data?.logentry?.message) return String(data.logentry.message);
-    return null;
+    return getMessage(parseResult());
   };
 
   const updateMutation = createMutation(() => ({
@@ -647,6 +635,8 @@ export default function IssueDetail() {
                       request={request()}
                       user={user()}
                     />
+
+                    <AttachmentsPanel eventId={event().id} />
 
                     <Show when={extra() && Object.keys(extra()!).length > 0}>
                       <div class="card">

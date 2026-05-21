@@ -20,6 +20,10 @@ export const queryKeys = {
     list: (issueId: string) => ["events", issueId] as const,
     detail: (id: string) => ["events", "detail", id] as const,
     latest: (issueId: string) => ["events", issueId, "latest"] as const,
+    attachments: (eventId: string | number) =>
+      ["events", "detail", eventId, "attachments"] as const,
+    attachmentText: (eventId: string | number, attachmentId: string | number) =>
+      ["events", "detail", eventId, "attachments", attachmentId, "text"] as const,
   },
   comments: {
     list: (issueId: string) => ["comments", issueId] as const,

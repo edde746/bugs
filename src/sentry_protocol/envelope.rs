@@ -44,6 +44,7 @@ pub struct ItemHeaders {
     pub length: Option<usize>,
     pub content_type: Option<String>,
     pub filename: Option<String>,
+    pub attachment_type: Option<String>,
 }
 
 /// Extract only the event_id from the first line of an envelope.

@@ -120,6 +120,155 @@ async fn test_envelope_ingest_and_processing() {
 }
 
 #[tokio::test]
+async fn test_envelope_attachment_metadata_text_and_download() {
+    let (base_url, _handle) = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    let project: serde_json::Value = client
+        .post(format!("{base_url}/api/internal/projects"))
+        .json(&serde_json::json!({"name": "Attachments", "slug": "attachments"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let project_id = project["id"].as_i64().unwrap();
+
+    let keys: Vec<serde_json::Value> = client
+        .get(format!(
+            "{base_url}/api/internal/projects/{project_id}/keys"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let public_key = keys[0]["public_key"].as_str().unwrap();
+
+    let event_id = "f1b2c3d4e5f60000f1b2c3d4e5f60002";
+    let event_json = serde_json::json!({
+        "event_id": event_id,
+        "level": "error",
+        "message": "Event with attachment"
+    });
+    let event_str = serde_json::to_string(&event_json).unwrap();
+    let attachment = b"hello from attachment\nsecond line\n";
+
+    let mut envelope = Vec::new();
+    envelope.extend_from_slice(format!("{{\"event_id\":\"{event_id}\"}}\n").as_bytes());
+    envelope.extend_from_slice(
+        format!("{{\"type\":\"event\",\"length\":{}}}\n", event_str.len()).as_bytes(),
+    );
+    envelope.extend_from_slice(event_str.as_bytes());
+    envelope.push(b'\n');
+    envelope.extend_from_slice(
+        format!(
+            "{{\"type\":\"attachment\",\"length\":{},\"filename\":\"log.txt\",\"content_type\":\"text/plain\",\"attachment_type\":\"event.attachment\"}}\n",
+            attachment.len()
+        )
+        .as_bytes(),
+    );
+    envelope.extend_from_slice(attachment);
+    envelope.push(b'\n');
+
+    let resp = client
+        .post(format!("{base_url}/api/{project_id}/envelope/"))
+        .header("X-Sentry-Auth", format!("Sentry sentry_key={public_key}"))
+        .body(envelope)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    let issues: serde_json::Value = client
+        .get(format!(
+            "{base_url}/api/internal/projects/attachments/issues"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let issue_id = issues["issues"][0]["id"].as_i64().unwrap();
+
+    let events_resp: serde_json::Value = client
+        .get(format!("{base_url}/api/internal/issues/{issue_id}/events"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let event_row_id = events_resp["events"][0]["id"].as_i64().unwrap();
+
+    let attachments: serde_json::Value = client
+        .get(format!(
+            "{base_url}/api/internal/events/{event_row_id}/attachments"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let attachment_meta = &attachments.as_array().unwrap()[0];
+    let attachment_id = attachment_meta["id"].as_i64().unwrap();
+    assert_eq!(attachment_meta["name"], "log.txt");
+    assert_eq!(attachment_meta["content_type"], "text/plain");
+    assert_eq!(attachment_meta["attachment_type"], "event.attachment");
+    assert_eq!(
+        attachment_meta["size"].as_i64().unwrap(),
+        attachment.len() as i64
+    );
+
+    let text = client
+        .get(format!(
+            "{base_url}/api/internal/events/{event_row_id}/attachments/{attachment_id}/text"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(text.as_bytes(), attachment);
+
+    let download_resp = client
+        .get(format!(
+            "{base_url}/api/internal/events/{event_row_id}/attachments/{attachment_id}/download"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(download_resp.status(), 200);
+    assert_eq!(
+        download_resp
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "text/plain"
+    );
+    assert_eq!(
+        download_resp
+            .headers()
+            .get("content-disposition")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "attachment; filename=\"log.txt\""
+    );
+    let downloaded = download_resp.bytes().await.unwrap();
+    assert_eq!(downloaded.as_ref(), attachment);
+}
+
+#[tokio::test]
 async fn test_ingest_rejects_mismatched_project_id() {
     let (base_url, _handle) = start_test_server().await;
     let client = reqwest::Client::new();
