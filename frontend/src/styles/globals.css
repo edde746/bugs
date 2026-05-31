@@ -1590,22 +1590,28 @@ label.field-label--sm {
   overflow: hidden;
 }
 
+.raw-json__header {
+  display: flex;
+  align-items: stretch;
+  background: var(--color-surface-1);
+}
+
+.raw-json__header--open {
+  border-bottom: 1px solid var(--color-border);
+}
+
 .raw-json__toggle {
   display: flex;
-  width: 100%;
+  flex: 1;
   align-items: center;
   justify-content: space-between;
   border: none;
-  background: var(--color-surface-1);
+  background: transparent;
   padding: 12px 16px;
   font-family: var(--font-sans);
   cursor: pointer;
   text-align: left;
   color: var(--color-text-primary);
-}
-
-.raw-json__toggle:not(:last-child) {
-  border-bottom: 1px solid var(--color-border);
 }
 
 .raw-json__toggle-label {
@@ -1620,6 +1626,31 @@ label.field-label--sm {
 .raw-json__toggle-icon svg {
   width: 16px;
   height: 16px;
+}
+
+.raw-json__download {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  border-left: 1px solid var(--color-border);
+  background: transparent;
+  padding: 0 14px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.raw-json__download:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text-primary);
+}
+
+.raw-json__download svg {
+  width: 14px;
+  height: 14px;
 }
 
 .raw-json__content {

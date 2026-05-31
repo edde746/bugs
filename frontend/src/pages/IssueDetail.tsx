@@ -35,6 +35,7 @@ import AttachmentsPanel from "~/components/events/AttachmentsPanel";
 import CopyButton from "~/components/ui/CopyButton";
 import IconArrowLeft from "~icons/lucide/arrow-left";
 import IconArrowRight from "~icons/lucide/arrow-right";
+import IconDownload from "~icons/lucide/download";
 import IconEye from "~icons/lucide/eye";
 import IconEyeOff from "~icons/lucide/eye-off";
 import { getFrameName, getFrameLocation } from "~/components/events/StacktraceViewer";
@@ -93,6 +94,10 @@ function activityKindLabel(kind: string): string {
   return ACTIVITY_LABELS[kind] ?? kind;
 }
 
+function filenamePart(value: string | number | null | undefined, fallback: string): string {
+  return String(value ?? fallback).replace(/[^a-z0-9._-]+/gi, "-") || fallback;
+}
+
 export default function IssueDetail() {
   const params = useParams<{ project: string; issueId: string }>();
   const queryClient = useQueryClient();
@@ -138,6 +143,32 @@ export default function IssueDetail() {
     return r.ok ? r.data : null;
   };
   const parseOk = () => parseResult().ok;
+
+  const rawJsonText = () => {
+    const result = parseResult();
+    if (result.ok) return JSON.stringify(result.data, null, 2);
+    return currentEvent()?.data ?? "";
+  };
+
+  const rawJsonFilename = () => {
+    const event = currentEvent();
+    const eventId = filenamePart(event?.event_id ?? event?.id, "event");
+    return `event-${eventId}.json`;
+  };
+
+  const handleDownloadRawJson = () => {
+    const blob = new Blob([`${rawJsonText()}\n`], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = rawJsonFilename();
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   const exceptions = () => {
     return getExceptions(parseResult()) as ExceptionValue[];
@@ -748,18 +779,34 @@ export default function IssueDetail() {
                     </Show>
 
                     <div class="raw-json">
-                      <button
-                        class="raw-json__toggle"
-                        onClick={() => setShowRaw(!showRaw())}
+                      <div
+                        class="raw-json__header"
+                        classList={{ "raw-json__header--open": showRaw() }}
                       >
-                        <span class="raw-json__toggle-label">Raw JSON</span>
-                        <span class="raw-json__toggle-icon">
-                          {showRaw() ? <IconEyeOff /> : <IconEye />}
-                        </span>
-                      </button>
+                        <button
+                          class="raw-json__toggle"
+                          type="button"
+                          onClick={() => setShowRaw(!showRaw())}
+                        >
+                          <span class="raw-json__toggle-label">Raw JSON</span>
+                          <span class="raw-json__toggle-icon">
+                            {showRaw() ? <IconEyeOff /> : <IconEye />}
+                          </span>
+                        </button>
+                        <button
+                          class="raw-json__download"
+                          type="button"
+                          onClick={handleDownloadRawJson}
+                          title="Download raw JSON"
+                          aria-label="Download raw JSON"
+                        >
+                          <IconDownload aria-hidden="true" />
+                          Download
+                        </button>
+                      </div>
                       <Show when={showRaw()}>
                         <pre class="raw-json__content">
-                          {JSON.stringify(parsedData(), null, 2)}
+                          {rawJsonText()}
                         </pre>
                       </Show>
                     </div>
