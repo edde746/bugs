@@ -31,8 +31,12 @@ export interface Issue {
   metadata: string | null;
 }
 
+export interface IssueListItem extends Issue {
+  comment_count: number;
+}
+
 export interface IssueListResponse {
-  issues: Issue[];
+  issues: IssueListItem[];
   nextCursor: string | null;
 }
 

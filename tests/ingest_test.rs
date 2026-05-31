@@ -102,6 +102,7 @@ async fn test_envelope_ingest_and_processing() {
             .contains("TypeError")
     );
     assert_eq!(issue_list[0]["event_count"].as_i64().unwrap(), 1);
+    assert_eq!(issue_list[0]["comment_count"].as_i64().unwrap(), 0);
 
     // Verify event was stored
     let issue_id = issue_list[0]["id"].as_i64().unwrap();
@@ -117,6 +118,32 @@ async fn test_envelope_ingest_and_processing() {
     let events = events_resp["events"].as_array().unwrap();
     assert_eq!(events.len(), 1);
     assert_eq!(events[0]["event_id"].as_str().unwrap(), event_id);
+
+    // Verify issue list includes comment counts
+    let comment_resp = client
+        .post(format!(
+            "{base_url}/api/internal/issues/{issue_id}/comments"
+        ))
+        .json(&serde_json::json!({"text": "Investigating"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(comment_resp.status(), 201);
+
+    let issues_with_comment: serde_json::Value = client
+        .get(format!("{base_url}/api/internal/projects/test/issues"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        issues_with_comment["issues"][0]["comment_count"]
+            .as_i64()
+            .unwrap(),
+        1
+    );
 }
 
 #[tokio::test]

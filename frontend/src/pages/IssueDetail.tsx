@@ -180,6 +180,7 @@ export default function IssueDetail() {
     onSuccess: () => {
       setCommentText("");
       queryClient.invalidateQueries({ queryKey: queryKeys.comments.list(params.issueId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.issues.listPrefix(params.project) });
     },
   }));
 
@@ -187,6 +188,7 @@ export default function IssueDetail() {
     mutationFn: (id: number) => api.delete(`/internal/comments/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.comments.list(params.issueId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.issues.listPrefix(params.project) });
     },
   }));
 

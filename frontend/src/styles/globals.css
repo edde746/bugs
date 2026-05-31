@@ -585,6 +585,27 @@ pre, code {
   color: var(--color-text-secondary);
 }
 
+.issue-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.comment-count-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-1);
+  color: var(--color-text-secondary);
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
 .data-table td .culprit {
   margin-top: 2px;
   font-size: 11px;

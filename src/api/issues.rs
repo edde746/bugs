@@ -7,7 +7,8 @@ use axum::{
     routing::{get, put},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -48,6 +49,13 @@ fn default_limit() -> i64 {
 struct CursorData {
     v: String,
     id: i64,
+}
+
+#[derive(Serialize)]
+struct IssueListItem<'a> {
+    #[serde(flatten)]
+    issue: &'a Issue,
+    comment_count: i64,
 }
 
 fn decode_cursor(cursor: &str) -> Option<CursorData> {
@@ -175,6 +183,35 @@ async fn list_issues(
 
     let has_next = issues.len() as i64 > limit;
     let items: Vec<&Issue> = issues.iter().take(limit as usize).collect();
+    let comment_counts: HashMap<i64, i64> = if items.is_empty() {
+        HashMap::new()
+    } else {
+        let mut builder = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "SELECT issue_id, COUNT(*) AS comment_count FROM issue_comments WHERE issue_id IN (",
+        );
+        {
+            let mut separated = builder.separated(", ");
+            for issue in &items {
+                separated.push_bind(issue.id);
+            }
+            separated.push_unseparated(") GROUP BY issue_id");
+        }
+
+        builder
+            .build_query_as::<(i64, i64)>()
+            .fetch_all(state.db.reader())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .into_iter()
+            .collect()
+    };
+    let items_with_counts: Vec<IssueListItem<'_>> = items
+        .iter()
+        .map(|issue| IssueListItem {
+            issue,
+            comment_count: comment_counts.get(&issue.id).copied().unwrap_or(0),
+        })
+        .collect();
     let next_cursor = if has_next {
         items.last().map(|i| {
             let sort_value = match sort_col {
@@ -189,7 +226,7 @@ async fn list_issues(
     };
 
     Ok(Json(serde_json::json!({
-        "issues": items,
+        "issues": items_with_counts,
         "nextCursor": next_cursor,
     })))
 }

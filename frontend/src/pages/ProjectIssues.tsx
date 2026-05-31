@@ -22,6 +22,10 @@ const SORT_OPTIONS = [
   { value: "events", label: "Events" },
 ] as const;
 
+function commentLabel(count: number) {
+  return `${formatNumber(count)} comment${count === 1 ? "" : "s"}`;
+}
+
 export default function ProjectIssues() {
   const params = useParams<{ project: string }>();
   const queryClient = useQueryClient();
@@ -343,9 +347,19 @@ export default function ProjectIssues() {
                         <Badge level={issue.level} />
                       </td>
                       <td>
-                        <A href={`/${params.project}/issues/${issue.id}`}>
-                          {issue.title}
-                        </A>
+                        <div class="issue-title-row">
+                          <A href={`/${params.project}/issues/${issue.id}`}>
+                            {issue.title}
+                          </A>
+                          <Show when={issue.comment_count > 0}>
+                            <span
+                              class="comment-count-badge"
+                              title={commentLabel(issue.comment_count)}
+                            >
+                              {commentLabel(issue.comment_count)}
+                            </span>
+                          </Show>
+                        </div>
                         {issue.culprit && (
                           <div class="culprit">{issue.culprit}</div>
                         )}
