@@ -14,6 +14,7 @@ import EmptyState from "~/components/ui/EmptyState";
 import ErrorState from "~/components/ui/ErrorState";
 import IconArrowLeft from "~icons/lucide/arrow-left";
 import IconArrowRight from "~icons/lucide/arrow-right";
+import IconMessageSquare from "~icons/lucide/message-square";
 
 const STATUSES = ["unresolved", "resolved", "ignored"] as const;
 const SORT_OPTIONS = [
@@ -355,8 +356,10 @@ export default function ProjectIssues() {
                             <span
                               class="comment-count-badge"
                               title={commentLabel(issue.comment_count)}
+                              aria-label={commentLabel(issue.comment_count)}
                             >
-                              {commentLabel(issue.comment_count)}
+                              <IconMessageSquare aria-hidden="true" />
+                              {formatNumber(issue.comment_count)}
                             </span>
                           </Show>
                         </div>

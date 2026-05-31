@@ -595,6 +595,7 @@ pre, code {
 .comment-count-badge {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--color-border);
   background: var(--color-surface-1);
@@ -604,6 +605,11 @@ pre, code {
   font-weight: 500;
   line-height: 1.4;
   white-space: nowrap;
+}
+
+.comment-count-badge svg {
+  width: 12px;
+  height: 12px;
 }
 
 .data-table td .culprit {
@@ -2077,8 +2083,98 @@ label.field-label--sm {
 .comment__text {
   font-size: 13px;
   line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.comment__text.markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.comment__text.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+.comment__text.markdown-body p,
+.comment__text.markdown-body ul,
+.comment__text.markdown-body ol,
+.comment__text.markdown-body blockquote,
+.comment__text.markdown-body pre,
+.comment__text.markdown-body table,
+.comment__text.markdown-body hr {
+  margin: 0 0 8px;
+}
+
+.comment__text.markdown-body h1,
+.comment__text.markdown-body h2,
+.comment__text.markdown-body h3,
+.comment__text.markdown-body h4,
+.comment__text.markdown-body h5,
+.comment__text.markdown-body h6 {
+  margin: 10px 0 6px;
+  font-size: 13px;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.comment__text.markdown-body a {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.comment__text.markdown-body ul,
+.comment__text.markdown-body ol {
+  padding-left: 18px;
+}
+
+.comment__text.markdown-body blockquote {
+  padding-left: 10px;
+  border-left: 2px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.comment__text.markdown-body code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--color-surface-2);
+  font-size: 12px;
+}
+
+.comment__text.markdown-body pre {
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface-0);
+}
+
+.comment__text.markdown-body pre code {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.comment__text.markdown-body table {
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+  border-collapse: collapse;
+}
+
+.comment__text.markdown-body th,
+.comment__text.markdown-body td {
+  padding: 4px 8px;
+  border: 1px solid var(--color-border);
+}
+
+.comment__text.markdown-body th {
+  font-weight: 600;
+  background: var(--color-surface-2);
+}
+
+.comment__text.markdown-body hr {
+  border: 0;
+  border-top: 1px solid var(--color-border);
 }
 
 .comment__meta {

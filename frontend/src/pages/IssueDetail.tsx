@@ -1,5 +1,7 @@
 import { A, useParams } from "@solidjs/router";
 import { createQuery, createMutation, useQueryClient } from "@tanstack/solid-query";
+import DOMPurify from "dompurify";
+import { marked } from "marked";
 import { createSignal, createMemo, Show, For } from "solid-js";
 import { api } from "~/api/client";
 import { queryKeys } from "~/queries/keys";
@@ -49,6 +51,43 @@ const ACTIVITY_LABELS: Record<string, string> = {
   unignored: "Unignored",
   regression: "Regression detected",
 };
+
+const COMMENT_MARKDOWN_TAGS = [
+  "a",
+  "blockquote",
+  "br",
+  "code",
+  "del",
+  "em",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "hr",
+  "li",
+  "ol",
+  "p",
+  "pre",
+  "strong",
+  "table",
+  "tbody",
+  "td",
+  "th",
+  "thead",
+  "tr",
+  "ul",
+];
+
+function renderCommentMarkdown(text: string): string {
+  const html = marked.parse(text, { async: false, breaks: true, gfm: true });
+
+  return DOMPurify.sanitize(html, {
+    ALLOWED_ATTR: ["href", "title"],
+    ALLOWED_TAGS: COMMENT_MARKDOWN_TAGS,
+  });
+}
 
 function activityKindLabel(kind: string): string {
   return ACTIVITY_LABELS[kind] ?? kind;
@@ -766,7 +805,10 @@ export default function IssueDetail() {
                   <For each={commentsQuery.data}>
                     {(comment) => (
                       <div class="comment">
-                        <div class="comment__text">{comment.text}</div>
+                        <div
+                          class="comment__text markdown-body"
+                          innerHTML={renderCommentMarkdown(comment.text)}
+                        />
                         <div class="comment__meta">
                           <span class="text-secondary text-sm">{relativeTime(comment.created_at)}</span>
                           <button
@@ -796,7 +838,7 @@ export default function IssueDetail() {
                   rows={2}
                 />
                 <div class="comment-compose__actions">
-                  <span class="text-xs text-secondary">Ctrl+Enter to post</span>
+                  <span class="text-xs text-secondary">Markdown supported. Ctrl+Enter to post</span>
                   <Button
                     variant="secondary"
                     size="sm"
