@@ -951,7 +951,7 @@ async fn start_test_server() -> (String, tokio::task::JoinHandle<()>) {
                 rate_limiter: bugs::ingest::abuse::RateLimiter::new(),
             };
 
-            let app = bugs::api::router(&state)
+            let app = bugs::api::router(&state, tokio_util::sync::CancellationToken::new())
                 .route("/health", axum::routing::get(|| async { "ok" }))
                 .with_state(state);
 

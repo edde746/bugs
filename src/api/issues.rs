@@ -29,16 +29,16 @@ pub fn routes() -> Router<AppState> {
 }
 
 #[derive(Deserialize)]
-struct IssueQuery {
-    status: Option<String>,
-    sort: Option<String>,
-    cursor: Option<String>,
-    query: Option<String>,
-    release: Option<String>,
-    environment: Option<String>,
-    level: Option<String>,
+pub(crate) struct IssueQuery {
+    pub(crate) status: Option<String>,
+    pub(crate) sort: Option<String>,
+    pub(crate) cursor: Option<String>,
+    pub(crate) query: Option<String>,
+    pub(crate) release: Option<String>,
+    pub(crate) environment: Option<String>,
+    pub(crate) level: Option<String>,
     #[serde(default = "default_limit")]
-    limit: i64,
+    pub(crate) limit: i64,
 }
 
 fn default_limit() -> i64 {
@@ -81,7 +81,7 @@ async fn resolve_project_id(state: &AppState, slug: &str) -> Result<i64, StatusC
     project.ok_or(StatusCode::NOT_FOUND).map(|p| p.0)
 }
 
-async fn list_issues(
+pub(crate) async fn list_issues(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Query(params): Query<IssueQuery>,
@@ -265,7 +265,7 @@ async fn list_issue_filters(
     })))
 }
 
-async fn get_issue(
+pub(crate) async fn get_issue(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Issue>, StatusCode> {
@@ -278,7 +278,7 @@ async fn get_issue(
         .ok_or(StatusCode::NOT_FOUND)
 }
 
-async fn update_issue(
+pub(crate) async fn update_issue(
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(input): Json<UpdateIssue>,

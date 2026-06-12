@@ -78,6 +78,7 @@ Configuration is loaded from (highest precedence first):
 | `BUGS_ENVELOPE_RETENTION_HOURS` | `envelope_retention_hours` | `24` | Hours to keep raw envelopes |
 | `BUGS_WORKER_THREADS` | `worker_threads` | `4` | Background processing threads |
 | `BUGS_AUTH__ADMIN_TOKEN` | `auth.admin_token` | *(empty)* | Bearer token for management API |
+| `BUGS_MCP__ENABLED` | `mcp.enabled` | `false` | Expose MCP server at `/mcp` for LLM agents |
 
 ### SQLite tuning
 
@@ -114,6 +115,17 @@ Set `BUGS_AUTH__ADMIN_TOKEN` to secure the management API and web UI. Requests m
 ### Ingest
 
 Ingest endpoints authenticate via Sentry DSN keys. Create a project in the UI to get a DSN, then configure your Sentry SDK with it.
+
+## MCP server
+
+Set `BUGS_MCP__ENABLED=true` to expose an [MCP](https://modelcontextprotocol.io/) server (Streamable HTTP) at `/mcp`, letting LLM agents query and triage your instance: list projects and issues, read full event payloads (stack traces, breadcrumbs, variables), full-text search, resolve/ignore issues, and leave comments. Destructive operations (deletes, project/key management) are not exposed.
+
+The endpoint shares the management API's bearer-token auth. Connect from Claude Code:
+
+```bash
+claude mcp add --transport http bugs http://localhost:9000/mcp \
+  --header "Authorization: Bearer <admin_token>"
+```
 
 ## Sentry SDK integration
 

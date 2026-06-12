@@ -30,6 +30,17 @@ pub struct Config {
     pub email: EmailConfig,
     #[serde(default)]
     pub uploads: UploadsConfig,
+    #[serde(default)]
+    pub mcp: McpConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct McpConfig {
+    /// Expose an MCP (Model Context Protocol) server at /mcp so LLM agents
+    /// can query and triage instance data. Shares the management API's
+    /// bearer-token auth. Default off; enable with BUGS_MCP__ENABLED=true.
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -326,6 +337,7 @@ impl Default for Config {
             symbolication: SymbolicationConfig::default(),
             email: EmailConfig::default(),
             uploads: UploadsConfig::default(),
+            mcp: McpConfig::default(),
         }
     }
 }

@@ -29,7 +29,9 @@ pub fn routes() -> Router<AppState> {
         )
 }
 
-async fn list_projects(State(state): State<AppState>) -> Result<Json<Vec<Project>>, StatusCode> {
+pub(crate) async fn list_projects(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<Project>>, StatusCode> {
     let projects: Vec<Project> = sqlx::query_as("SELECT * FROM projects ORDER BY created_at DESC")
         .fetch_all(state.db.reader())
         .await

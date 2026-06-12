@@ -2,6 +2,7 @@ pub mod api;
 pub mod config;
 pub mod db;
 pub mod ingest;
+pub mod mcp;
 pub mod models;
 pub mod sentry_protocol;
 pub mod util;

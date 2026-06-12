@@ -34,10 +34,10 @@ pub fn routes() -> Router<AppState> {
 }
 
 #[derive(Deserialize)]
-struct EventQuery {
+pub(crate) struct EventQuery {
     #[serde(default = "default_event_limit")]
-    limit: i64,
-    cursor: Option<String>,
+    pub(crate) limit: i64,
+    pub(crate) cursor: Option<String>,
 }
 
 fn default_event_limit() -> i64 {
@@ -68,7 +68,7 @@ const EVENT_LIST_COLUMNS: &str = "id, event_id, project_id, issue_id, timestamp,
      platform, release, environment, transaction_name, trace_id, message, \
      title, exception_values, stacktrace_functions";
 
-async fn list_events_for_issue(
+pub(crate) async fn list_events_for_issue(
     State(state): State<AppState>,
     Path(issue_id): Path<i64>,
     Query(params): Query<EventQuery>,
@@ -117,7 +117,7 @@ async fn list_events_for_issue(
     })))
 }
 
-async fn latest_event(
+pub(crate) async fn latest_event(
     State(state): State<AppState>,
     Path(issue_id): Path<i64>,
 ) -> Result<Json<Event>, StatusCode> {
@@ -130,7 +130,7 @@ async fn latest_event(
         .ok_or(StatusCode::NOT_FOUND)
 }
 
-async fn get_event(
+pub(crate) async fn get_event(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Event>, StatusCode> {

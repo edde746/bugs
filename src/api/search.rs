@@ -13,12 +13,12 @@ pub fn routes() -> Router<AppState> {
 }
 
 #[derive(Debug, Deserialize)]
-struct SearchParams {
-    q: String,
-    project: Option<String>,
+pub(crate) struct SearchParams {
+    pub(crate) q: String,
+    pub(crate) project: Option<String>,
 }
 
-async fn search_events(
+pub(crate) async fn search_events(
     State(state): State<AppState>,
     Query(params): Query<SearchParams>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {

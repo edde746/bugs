@@ -31,7 +31,10 @@ pub fn normalized_make_service<S>(service: S) -> Shared<NormalizePath<S>> {
     Shared::new(NormalizePath::trim_trailing_slash(service))
 }
 
-pub fn router(state: &AppState) -> Router<AppState> {
+pub fn router(
+    state: &AppState,
+    mcp_cancel: tokio_util::sync::CancellationToken,
+) -> Router<AppState> {
     // Public health endpoint — outside auth middleware so container
     // orchestrators (Docker HEALTHCHECK, Kubernetes livenessProbe) can
     // poll it without a token. Intentionally minimal: no DB round-trip.
@@ -43,7 +46,7 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route("/api/internal/auth/check", post(auth_check));
 
     // Management routes that require admin auth
-    let management_routes = Router::new()
+    let mut management_routes = Router::new()
         .merge(projects::routes())
         .merge(issues::routes())
         .merge(events::routes())
@@ -54,7 +57,19 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .merge(comments::routes())
         .merge(user_reports::routes())
         .merge(performance::routes())
-        .merge(chunked_upload::routes())
+        .merge(chunked_upload::routes());
+
+    // MCP endpoint: same trust domain as the management API, so it lives
+    // inside the admin_auth_check route_layer below. Not mounted at all
+    // when disabled.
+    if state.config.mcp.enabled {
+        management_routes = management_routes.nest_service(
+            "/mcp",
+            crate::mcp::streamable_http_service(state.clone(), mcp_cancel),
+        );
+    }
+
+    let management_routes = management_routes
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             admin_auth_check,

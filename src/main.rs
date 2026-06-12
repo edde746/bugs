@@ -82,7 +82,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rate_limiter: bugs::ingest::abuse::RateLimiter::new(),
     };
 
-    let app = bugs::api::router(&state)
+    // Owns the MCP sessions' SSE streams; cancelled at shutdown so they
+    // close and the HTTP drain below can finish.
+    let mcp_cancel = tokio_util::sync::CancellationToken::new();
+
+    let app = bugs::api::router(&state, mcp_cancel.child_token())
         .route("/health", axum::routing::get(|| async { "ok" }))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .layer(tower_http::compression::CompressionLayer::new())
@@ -116,6 +120,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // the HTTP drain. receiver side of the watch only sees `changed()`
             // fire when the value actually differs from the initial `false`.
             let _ = shutdown_tx.send(true);
+            // Close MCP sessions and their SSE streams; an idle MCP client
+            // would otherwise hold a connection open and stall the drain.
+            mcp_cancel.cancel();
         })
         .await?;
 

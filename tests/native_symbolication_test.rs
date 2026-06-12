@@ -528,7 +528,7 @@ async fn start_test_server_with_upload_limit(
                 rate_limiter: bugs::ingest::abuse::RateLimiter::new(),
             };
 
-            let app = bugs::api::router(&state)
+            let app = bugs::api::router(&state, tokio_util::sync::CancellationToken::new())
                 .route("/health", axum::routing::get(|| async { "ok" }))
                 .with_state(state);
 

@@ -24,7 +24,7 @@ pub fn routes() -> Router<AppState> {
         )
 }
 
-async fn list_comments(
+pub(crate) async fn list_comments(
     State(state): State<AppState>,
     Path(issue_id): Path<i64>,
 ) -> Result<Json<Vec<IssueComment>>, StatusCode> {
@@ -38,7 +38,7 @@ async fn list_comments(
     Ok(Json(comments))
 }
 
-async fn create_comment(
+pub(crate) async fn create_comment(
     State(state): State<AppState>,
     Path(issue_id): Path<i64>,
     Json(input): Json<CreateComment>,
@@ -54,7 +54,7 @@ async fn create_comment(
     Ok((StatusCode::CREATED, Json(comment)))
 }
 
-async fn list_activity(
+pub(crate) async fn list_activity(
     State(state): State<AppState>,
     Path(issue_id): Path<i64>,
 ) -> Result<Json<Vec<IssueActivity>>, StatusCode> {
