@@ -1,4 +1,5 @@
 pub mod alerts;
+pub mod dart_symbol_map;
 pub mod fingerprint;
 pub mod indexer;
 pub mod native_symbolication;

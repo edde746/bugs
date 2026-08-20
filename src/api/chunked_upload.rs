@@ -38,7 +38,7 @@ use crate::AppState;
 use crate::util::atomic_fs::{copy_atomic, write_atomic};
 use crate::util::chunk_store::{chunk_path, touch_chunk};
 use crate::util::id::{hyphenate_debug_id, is_sha1_hex, normalize_debug_id};
-use crate::worker::native_symbolication;
+use crate::worker::{dart_symbol_map, native_symbolication};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -71,7 +71,7 @@ async fn chunk_options(
         "concurrency": cfg.chunk_concurrency,
         "hashAlgorithm": "sha1",
         "compression": ["gzip"],
-        "accept": ["debug_files", "sources"],
+        "accept": ["debug_files", "sources", "dartsymbolmap"],
     }))
 }
 
@@ -384,6 +384,16 @@ async fn assemble_one(
     .await
     .map_err(|e| format!("join: {e}"))??;
 
+    // 2b. Dart symbol maps are JSON arrays, not object files — like
+    //     upstream Sentry (models/debugfile.py, determine_dif_kind) we
+    //     detect them by the leading '[' byte. They are stored verbatim,
+    //     keyed by the debug_id sentry-cli sends with the assemble
+    //     request; the map bytes themselves carry no identifier.
+    if leading_byte(assembled.path()).await == Some(b'[') {
+        return assemble_dart_symbol_map(state, project_id, checksum, entry, assembled.path())
+            .await;
+    }
+
     // 3. Parse the assembled file as a DIF archive. CPU-bound, blocking.
     let assembled_path = assembled.path().to_path_buf();
     let request_name = entry.name.clone().unwrap_or_else(|| "upload".to_string());
@@ -485,6 +495,110 @@ async fn assemble_one(
             sha1: checksum.to_ascii_lowercase(),
             data: AssembleDifData {
                 features: primary.features.clone(),
+            },
+        }),
+    })
+}
+
+// =====================================================================
+// Dart symbol maps (dartsymbolmap)
+// =====================================================================
+
+async fn leading_byte(path: &Path) -> Option<u8> {
+    use tokio::io::AsyncReadExt;
+    let mut file = tokio::fs::File::open(path).await.ok()?;
+    let mut byte = [0u8; 1];
+    match file.read(&mut byte).await {
+        Ok(1) => Some(byte[0]),
+        _ => None,
+    }
+}
+
+/// Stores a Dart obfuscation map uploaded via `sentry-cli
+/// dart-symbol-map upload`. Validation mirrors upstream Sentry
+/// (detect_dif_from_path, DifKind.DartSymbolMap): the payload must be a
+/// JSON array with an even number of elements and the request must name
+/// a debug_id. The map is stored verbatim and indexed under the
+/// `dart_symbol_map` kind; `src/worker/dart_symbol_map.rs` applies it
+/// to obfuscated Dart events at processing time.
+async fn assemble_dart_symbol_map(
+    state: &AppState,
+    project_id: i64,
+    checksum: &str,
+    entry: &AssembleEntry,
+    assembled_path: &Path,
+) -> Result<AssembleResponse, String> {
+    let debug_id = entry
+        .debug_id
+        .as_deref()
+        .map(normalize_debug_id)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| "Missing debug_id for dartsymbolmap".to_string())?;
+    // Every real debug-id format (UUID, ELF build-id, PDB id + age)
+    // normalizes to at least 32 hex chars; shorter values could never
+    // match an event image and would corrupt the shard path below.
+    if debug_id.len() < 32 {
+        return Err(format!("invalid debug_id for dartsymbolmap: {debug_id}"));
+    }
+
+    let bytes = tokio::fs::read(assembled_path)
+        .await
+        .map_err(|e| format!("read assembled: {e}"))?;
+    let parsed: Value =
+        serde_json::from_slice(&bytes).map_err(|e| format!("Invalid dartsymbolmap: {e}"))?;
+    let entries = parsed
+        .as_array()
+        .ok_or_else(|| "dartsymbolmap must be a JSON array".to_string())?;
+    if !entries.len().is_multiple_of(2) {
+        return Err("dartsymbolmap array must have an even number of elements".to_string());
+    }
+
+    let shard = &debug_id[..2];
+    let dir = format!("{}/dartsymbolmaps/{}", state.config.artifacts_dir, shard);
+    let target = format!("{dir}/{debug_id}.json");
+    copy_atomic(assembled_path, &dir, &target)
+        .await
+        .map_err(|e| format!("copy {target}: {e}"))?;
+    dart_symbol_map::invalidate_map_path(&target);
+
+    let object_name = entry
+        .name
+        .clone()
+        .unwrap_or_else(|| "dartsymbolmap.json".to_string());
+    sqlx::query(
+        "INSERT INTO artifact_debug_ids \
+             (debug_id, project_id, release_id, file_path, source_name, arch, code_id, kind) \
+         VALUES (?, ?, NULL, ?, ?, ?, NULL, ?) \
+         ON CONFLICT(debug_id, kind) DO UPDATE SET \
+             project_id = excluded.project_id, \
+             release_id = excluded.release_id, \
+             file_path = excluded.file_path, \
+             source_name = excluded.source_name, \
+             arch = excluded.arch, \
+             code_id = excluded.code_id",
+    )
+    .bind(&debug_id)
+    .bind(project_id)
+    .bind(&target)
+    .bind(&object_name)
+    .bind("any")
+    .bind(dart_symbol_map::KIND)
+    .execute(state.db.writer())
+    .await
+    .map_err(|e| format!("db: {e}"))?;
+
+    Ok(AssembleResponse {
+        state: AssembleState::Ok,
+        missing_chunks: Vec::new(),
+        detail: None,
+        dif: Some(AssembleDif {
+            uuid: hyphenate_debug_id(&debug_id),
+            debug_id: hyphenate_debug_id(&debug_id),
+            object_name,
+            cpu_name: "any".to_string(),
+            sha1: checksum.to_ascii_lowercase(),
+            data: AssembleDifData {
+                features: vec!["mapping"],
             },
         }),
     })

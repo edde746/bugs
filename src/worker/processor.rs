@@ -9,7 +9,8 @@ use crate::sentry_protocol::types::SentryEvent;
 use crate::util::log::truncate;
 use crate::util::time::{hour_bucket, now_iso};
 use crate::worker::{
-    alerts, fingerprint, indexer, native_symbolication, normalizer, symbolication,
+    alerts, dart_symbol_map, fingerprint, indexer, native_symbolication, normalizer,
+    symbolication,
 };
 
 /// Cap on the length (in chars) of any user-derived string we put through
@@ -178,6 +179,12 @@ async fn process_inner(
             native_symbolication::symbolicate_native(&mut event, project_id, db).await;
         let symbolication_state: Option<&'static str> =
             combine_outcomes(js_outcome, &native_outcome);
+
+        // 6b. Dart/Flutter obfuscation: rewrite exception type/value via
+        //     an uploaded Dart symbol map before fingerprint/title
+        //     derivation so deobfuscated names flow into grouping,
+        //     titles, and the searchable exception_values column.
+        dart_symbol_map::deobfuscate_dart_event(&mut event, project_id, db).await;
 
         // 7. Compute fingerprint
         let fp = fingerprint::compute_fingerprint(&event);
