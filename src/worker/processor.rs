@@ -9,8 +9,7 @@ use crate::sentry_protocol::types::SentryEvent;
 use crate::util::log::truncate;
 use crate::util::time::{hour_bucket, now_iso};
 use crate::worker::{
-    alerts, dart_symbol_map, fingerprint, indexer, native_symbolication, normalizer,
-    symbolication,
+    alerts, dart_symbol_map, fingerprint, indexer, native_symbolication, normalizer, symbolication,
 };
 
 /// Cap on the length (in chars) of any user-derived string we put through

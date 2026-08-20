@@ -8,6 +8,7 @@ pub mod frontend;
 pub mod ingest;
 pub mod ingest_auth;
 pub mod issues;
+pub mod minidump;
 pub mod performance;
 pub mod projects;
 pub mod releases;

@@ -21,7 +21,9 @@ async fn test_chunk_upload_advertises_dartsymbolmap() {
     let client = reqwest::Client::new();
 
     let options: serde_json::Value = client
-        .get(format!("{base_url}/api/0/organizations/default/chunk-upload/"))
+        .get(format!(
+            "{base_url}/api/0/organizations/default/chunk-upload/"
+        ))
         .send()
         .await
         .unwrap()
@@ -285,7 +287,9 @@ async fn upload_chunk(client: &reqwest::Client, base_url: &str, bytes: &[u8]) ->
     body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
 
     let resp = client
-        .post(format!("{base_url}/api/0/organizations/default/chunk-upload/"))
+        .post(format!(
+            "{base_url}/api/0/organizations/default/chunk-upload/"
+        ))
         .header(
             "Content-Type",
             format!("multipart/form-data; boundary={boundary}"),

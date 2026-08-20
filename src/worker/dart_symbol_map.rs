@@ -190,10 +190,11 @@ async fn load_map(file_path: &str) -> Option<Arc<HashMap<String, String>>> {
         .iter()
         .map(|(k, v)| k.len() + v.len() + 64)
         .sum::<usize>();
-    MAP_CACHE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .put(file_path.to_string(), map.clone(), cost);
+    MAP_CACHE.lock().unwrap_or_else(|e| e.into_inner()).put(
+        file_path.to_string(),
+        map.clone(),
+        cost,
+    );
     Some(map)
 }
 
