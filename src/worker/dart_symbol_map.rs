@@ -31,18 +31,20 @@ use crate::util::id::normalize_debug_id;
 /// `artifact_debug_ids.kind` for stored Dart symbol maps.
 pub const KIND: &str = "dart_symbol_map";
 
+/// Parsed {obfuscated → deobfuscated} lookup, shared with the cache.
+type SharedSymbolMap = Arc<HashMap<String, String>>;
+
 /// file_path → parsed {obfuscated → deobfuscated} map. One Flutter app
 /// build ships one map (a few MB of JSON), so a small cache covers the
 /// hot path; the byte cost is the summed string lengths. Invalidated on
 /// upload via `invalidate_map_path` for the same reason as
 /// `NATIVE_CACHE`: uploads atomically rename over the stored file.
-static MAP_CACHE: LazyLock<Mutex<ByteCappedLru<String, Arc<HashMap<String, String>>>>> =
-    LazyLock::new(|| {
-        Mutex::new(ByteCappedLru::new(
-            NonZeroUsize::new(8).unwrap(),
-            64 * 1024 * 1024,
-        ))
-    });
+static MAP_CACHE: LazyLock<Mutex<ByteCappedLru<String, SharedSymbolMap>>> = LazyLock::new(|| {
+    Mutex::new(ByteCappedLru::new(
+        NonZeroUsize::new(8).unwrap(),
+        64 * 1024 * 1024,
+    ))
+});
 
 /// Drop a cached parsed map. The upload handler calls this after a
 /// successful atomic rename so subsequent events re-read the new bytes.
@@ -61,11 +63,7 @@ pub async fn deobfuscate_dart_event(event: &mut SentryEvent, project_id: i64, db
     if !is_dart_sdk(event) {
         return;
     }
-    if !event
-        .exception
-        .as_ref()
-        .is_some_and(|e| !e.values.is_empty())
-    {
+    if event.exception.as_ref().is_none_or(|e| e.values.is_empty()) {
         return;
     }
     let debug_ids = image_debug_ids(event.debug_meta.as_ref());
@@ -160,7 +158,7 @@ async fn load_map_path(
     Ok(q.fetch_optional(db.reader()).await?.map(|(path,)| path))
 }
 
-async fn load_map(file_path: &str) -> Option<Arc<HashMap<String, String>>> {
+async fn load_map(file_path: &str) -> Option<SharedSymbolMap> {
     if let Some(map) = MAP_CACHE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
