@@ -3,7 +3,7 @@
 //! Accepts dSYM / PDB / ELF / Dart split-debug-info payloads (either raw
 //! or ZIP-packed) and pre-processes each contained `Object` into a
 //! `SymCache` stored on disk. A row in `artifact_debug_ids` indexes each
-//! SymCache by `(debug_id, kind='native')` for per-project lookup at
+//! SymCache by `(project_id, debug_id, arch, kind='native')` for lookup at
 //! ingest time.
 
 use std::{
@@ -27,9 +27,8 @@ use tracing::warn;
 
 use crate::AppState;
 use crate::models::release::Release;
-use crate::util::atomic_fs::write_atomic;
+use crate::util::artifact_store::{ArtifactMetadata, ArtifactPayload, store_artifact};
 use crate::util::id::normalize_debug_id;
-use crate::worker::native_symbolication;
 
 #[derive(Serialize)]
 pub struct UploadedDif {
@@ -153,50 +152,27 @@ pub async fn upload_dsym(
 
     let mut uploaded = Vec::new();
     for dif in converted {
-        let shard = &dif.debug_id[..2];
-        let dir_path = format!(
-            "{}/native/{}/{}",
-            state.config.artifacts_dir, shard, dif.debug_id
-        );
-        let target = format!("{dir_path}/{}.symc", dif.arch);
-
         let size = dif.symcache_bytes.len();
-        if let Err(e) = write_atomic(&dir_path, &target, dif.symcache_bytes).await {
-            errors.push(UploadError {
-                entry: format!("{} ({})", dif.source_name, dif.arch),
-                reason: format!("write: {e}"),
-            });
-            continue;
-        }
-        native_symbolication::invalidate_symcache_path(&target);
-
-        let result = sqlx::query(
-            "INSERT INTO artifact_debug_ids \
-                 (debug_id, project_id, release_id, file_path, source_name, arch, code_id, kind) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'native') \
-             ON CONFLICT(debug_id, kind) DO UPDATE SET \
-                 project_id = excluded.project_id, \
-                 release_id = excluded.release_id, \
-                 file_path = excluded.file_path, \
-                 source_name = excluded.source_name, \
-                 arch = excluded.arch, \
-                 code_id = excluded.code_id",
+        if let Err(e) = store_artifact(
+            &state.db,
+            &state.config.artifacts_dir,
+            ArtifactMetadata {
+                project_id,
+                release_id,
+                debug_id: &dif.debug_id,
+                arch: &dif.arch,
+                code_id: dif.code_id.as_deref(),
+                source_name: &dif.source_name,
+                kind: "native",
+            },
+            ArtifactPayload::Bytes(dif.symcache_bytes),
         )
-        .bind(&dif.debug_id)
-        .bind(project_id)
-        .bind(release_id)
-        .bind(&target)
-        .bind(&dif.source_name)
-        .bind(&dif.arch)
-        .bind(&dif.code_id)
-        .execute(state.db.writer())
-        .await;
-
-        if let Err(e) = result {
-            warn!("artifact_debug_ids insert failed: {e}");
+        .await
+        {
+            warn!("artifact persistence failed: {e}");
             errors.push(UploadError {
                 entry: format!("{} ({})", dif.source_name, dif.arch),
-                reason: format!("db: {e}"),
+                reason: e,
             });
             continue;
         }

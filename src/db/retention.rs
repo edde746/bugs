@@ -123,6 +123,16 @@ async fn run_cleanup(
         Err(e) => warn!("Chunk retention cleanup failed: {e}"),
     }
 
+    if let Err(e) = crate::worker::dif_assembly::cleanup_staging(
+        writer,
+        artifacts_dir,
+        Duration::from_secs((chunk_retention_hours.max(1) as u64).saturating_mul(3600)),
+    )
+    .await
+    {
+        warn!("Assembly staging cleanup failed: {e}");
+    }
+
     let checkpoint: Result<(i64, i64, i64), _> = sqlx::query_as("PRAGMA wal_checkpoint(TRUNCATE)")
         .fetch_one(writer)
         .await;

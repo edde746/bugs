@@ -186,14 +186,17 @@ pub struct UploadsConfig {
     /// well within axum's memory comfort zone.
     #[serde(default = "default_max_request_size_mib")]
     pub max_request_size_mib: usize,
-    /// Advertised polling budget. We assemble synchronously and return
-    /// `ok` on the first call, so the client never actually sleeps.
+    /// Maximum client polling budget for background DIF processing.
     #[serde(default = "default_max_wait_secs")]
     pub max_wait_secs: u64,
     /// Advertised client-side upload concurrency. axum + SQLite under
     /// multipart upload is not embarrassingly parallel; 4 is sufficient.
     #[serde(default = "default_chunk_concurrency")]
     pub chunk_concurrency: u8,
+    /// Maximum simultaneous DIF conversions in this process. Keep this low:
+    /// a single large DWARF file can consume substantial conversion memory.
+    #[serde(default = "default_assembly_concurrency")]
+    pub assembly_concurrency: u8,
     /// How long chunk-upload blobs are kept on disk after last use. Assemble
     /// requests renew referenced chunks; this TTL is the safety net for
     /// interrupted uploads and crashed clients.
@@ -210,6 +213,7 @@ impl Default for UploadsConfig {
             max_request_size_mib: default_max_request_size_mib(),
             max_wait_secs: default_max_wait_secs(),
             chunk_concurrency: default_chunk_concurrency(),
+            assembly_concurrency: default_assembly_concurrency(),
             chunk_retention_hours: default_chunk_retention_hours(),
         }
     }
@@ -228,10 +232,13 @@ fn default_max_request_size_mib() -> usize {
     32
 }
 fn default_max_wait_secs() -> u64 {
-    60
+    600
 }
 fn default_chunk_concurrency() -> u8 {
     4
+}
+fn default_assembly_concurrency() -> u8 {
+    1
 }
 fn default_chunk_retention_hours() -> u32 {
     12

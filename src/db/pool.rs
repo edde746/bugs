@@ -187,6 +187,8 @@ impl DbPool {
             include_str!("../../migrations/016_symbolication_state.sql"),
             include_str!("../../migrations/017_debug_ids_project_and_arch.sql"),
             include_str!("../../migrations/018_event_attachments.sql"),
+            include_str!("../../migrations/019_artifact_identity.sql"),
+            include_str!("../../migrations/020_dif_assemblies.sql"),
         ];
 
         for (i, sql) in migrations.iter().enumerate() {
@@ -195,12 +197,16 @@ impl DbPool {
                 continue;
             }
 
+            // A table rebuild and its version marker must commit together.
+            // Otherwise interruption between DROP/RENAME or before the marker
+            // can leave the database impossible to migrate on the next start.
+            let mut transaction = self.writer.begin_with("BEGIN IMMEDIATE").await?;
             for statement in split_sql_statements(sql) {
                 let trimmed = statement.trim();
                 if trimmed.is_empty() {
                     continue;
                 }
-                if let Err(e) = sqlx::query(trimmed).execute(&self.writer).await {
+                if let Err(e) = sqlx::query(trimmed).execute(&mut *transaction).await {
                     // SQLITE_READONLY (code 8) at migration time usually
                     // means stale WAL, bad /data permissions, or a full
                     // disk. The preflight checkpoint above should have
@@ -229,8 +235,9 @@ impl DbPool {
 
             sqlx::query("INSERT INTO _migrations (version) VALUES (?)")
                 .bind(version)
-                .execute(&self.writer)
+                .execute(&mut *transaction)
                 .await?;
+            transaction.commit().await?;
 
             info!(migration = version, "Migration applied");
         }

@@ -1,5 +1,6 @@
 pub mod alerts;
 pub mod dart_symbol_map;
+pub(crate) mod dif_assembly;
 pub mod fingerprint;
 pub mod indexer;
 pub mod native_symbolication;
@@ -28,7 +29,13 @@ pub fn spawn(
     shutdown: watch::Receiver<bool>,
 ) -> Vec<JoinHandle<()>> {
     let num_workers = config.worker_threads;
-    let mut handles = Vec::with_capacity(num_workers + 1);
+    let mut handles =
+        Vec::with_capacity(num_workers + 1 + config.uploads.assembly_concurrency as usize);
+    handles.extend(dif_assembly::spawn(
+        db.clone(),
+        config.clone(),
+        shutdown.clone(),
+    ));
 
     // Wrap the single receiver in Arc<Mutex> so workers compete for messages
     let shared_rx = Arc::new(tokio::sync::Mutex::new(rx));

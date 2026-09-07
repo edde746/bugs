@@ -6,13 +6,9 @@
 //! - `POST /api/0/organizations/{org}/chunk-upload/` — chunk receive (multipart, SHA1-indexed)
 //! - `POST /api/0/projects/{org}/{project}/files/difs/assemble/` — per-DIF assembly + processing
 //!
-//! Chunks are staged on disk under `<artifacts_dir>/chunks/<sha1[..2]>/<sha1>`
-//! (git-objects-style). On assemble, referenced chunks are concatenated
-//! into a temp file, parsed via `symbolic::debuginfo::Archive`, and
-//! processed the same way as the legacy `/files/dsyms/` endpoint — except
-//! that `ObjectKind::Sources` (the `--include-sources` artifact) is
-//! stored as-is at `<artifacts_dir>/sources/<sha1[..2]>/<debug_id>.zip`
-//! instead of dropped into an empty SymCache.
+//! Chunks are content-addressed on disk. Assemble requests inspect durable
+//! receipts and enqueue missing work; a bounded background worker hashes,
+//! converts and publishes artifacts independently of the HTTP connection.
 
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
@@ -35,10 +31,13 @@ use tempfile::NamedTempFile;
 use tracing::warn;
 
 use crate::AppState;
-use crate::util::atomic_fs::{copy_atomic, write_atomic};
+use crate::config::Config;
+use crate::db::DbPool;
+use crate::util::artifact_store::{ArtifactMetadata, ArtifactPayload, store_artifact};
+use crate::util::atomic_fs::write_atomic;
 use crate::util::chunk_store::{chunk_path, touch_chunk};
 use crate::util::id::{hyphenate_debug_id, is_sha1_hex, normalize_debug_id};
-use crate::worker::{dart_symbol_map, native_symbolication};
+use crate::worker::{dart_symbol_map, dif_assembly};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -202,42 +201,60 @@ async fn upload_chunks(
 // POST files/difs/assemble — concatenate chunks, parse, store
 // =====================================================================
 
-#[derive(Debug, Deserialize)]
-struct AssembleEntry {
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub(crate) struct AssembleEntry {
     #[serde(default)]
-    name: Option<String>,
+    pub name: Option<String>,
     #[serde(default)]
-    debug_id: Option<String>,
+    pub debug_id: Option<String>,
     #[serde(default)]
-    chunks: Vec<String>,
+    pub chunks: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AssembleResponse {
-    state: AssembleState,
-    missing_chunks: Vec<String>,
+pub(crate) struct AssembleResponse {
+    pub state: AssembleState,
+    pub missing_chunks: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    detail: Option<String>,
+    pub detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    dif: Option<AssembleDif>,
+    pub dif: Option<AssembleDif>,
 }
 
-#[derive(Debug, Serialize)]
+impl AssembleResponse {
+    pub fn error(detail: impl Into<String>) -> Self {
+        Self {
+            state: AssembleState::Error,
+            missing_chunks: Vec::new(),
+            detail: Some(detail.into()),
+            dif: None,
+        }
+    }
+
+    pub fn assembling() -> Self {
+        Self {
+            state: AssembleState::Assembling,
+            missing_chunks: Vec::new(),
+            detail: None,
+            dif: None,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum AssembleState {
+pub(crate) enum AssembleState {
     NotFound,
+    Assembling,
     Error,
     Ok,
 }
 
-/// `uuid` and `debug_id` both carry the same hyphenated debug-id —
-/// sentry-cli's `DebugInfoFile` deserializer reads `id.or(uuid)` so
-/// either is sufficient, but we populate both for compatibility across
-/// client versions.
-#[derive(Debug, Serialize)]
+/// Both ID fields are populated for compatibility with sentry-cli versions.
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AssembleDif {
+pub(crate) struct AssembleDif {
     uuid: String,
     debug_id: String,
     object_name: String,
@@ -246,9 +263,22 @@ struct AssembleDif {
     data: AssembleDifData,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct AssembleDifData {
-    features: Vec<&'static str>,
+    features: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct AssemblyArtifact {
+    pub debug_id: String,
+    pub arch: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct AssemblyResult {
+    pub response: AssembleResponse,
+    pub artifacts: Vec<AssemblyArtifact>,
 }
 
 async fn assemble_difs(
@@ -266,7 +296,6 @@ async fn assemble_difs(
             .0
     };
 
-    let chunks_root = format!("{}/chunks", state.config.artifacts_dir);
     let mut response = HashMap::<String, AssembleResponse>::new();
 
     for (checksum, entry) in request {
@@ -282,30 +311,24 @@ async fn assemble_difs(
             );
             continue;
         }
-        let result = assemble_one(&state, project_id, &chunks_root, &checksum, &entry).await;
-        let resp = match result {
-            Ok(resp) => resp,
-            Err(e) => AssembleResponse {
-                state: AssembleState::Error,
-                missing_chunks: Vec::new(),
-                detail: Some(e),
-                dif: None,
-            },
-        };
+        let resp = dif_assembly::request(&state.db, &state.config, project_id, &checksum, &entry)
+            .await
+            .unwrap_or_else(AssembleResponse::error);
         response.insert(checksum, resp);
     }
 
     Ok(Json(response))
 }
 
-async fn assemble_one(
-    state: &AppState,
+pub(crate) async fn assemble_one(
+    db: &DbPool,
+    config: &Config,
     project_id: i64,
     chunks_root: &str,
     checksum: &str,
     entry: &AssembleEntry,
-) -> Result<AssembleResponse, String> {
-    // 1. Verify all chunks present on disk.
+) -> Result<AssemblyResult, String> {
+    // These are job-owned hard links, not expiring upload staging chunks.
     let mut missing = Vec::new();
     let mut chunk_paths: Vec<PathBuf> = Vec::with_capacity(entry.chunks.len());
     for ch in &entry.chunks {
@@ -317,23 +340,14 @@ async fn assemble_one(
         if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
             missing.push(lower);
         } else {
-            if let Err(e) = touch_chunk(&path).await {
-                if e.kind() == io::ErrorKind::NotFound {
-                    missing.push(lower);
-                    continue;
-                }
-                warn!(path = %path.display(), "failed to refresh chunk mtime during assemble: {e}");
-            }
             chunk_paths.push(path);
         }
     }
     if !missing.is_empty() {
-        return Ok(AssembleResponse {
-            state: AssembleState::NotFound,
-            missing_chunks: missing,
-            detail: None,
-            dif: None,
-        });
+        return Err(format!(
+            "assembly staging chunks missing: {}",
+            missing.join(", ")
+        ));
     }
     if chunk_paths.is_empty() {
         return Err("no chunks in request".to_string());
@@ -342,7 +356,7 @@ async fn assemble_one(
     // 2. Stream-concatenate into a temp file, hashing as we go. Verify
     //    the final SHA1 matches the overall checksum.
     let checksum_owned = checksum.to_ascii_lowercase();
-    let max_bytes = state.config.uploads.max_bytes;
+    let max_bytes = config.uploads.max_bytes;
     let assembled = tokio::task::spawn_blocking(move || -> Result<NamedTempFile, String> {
         let temp = tempfile::Builder::new()
             .prefix("bugs-assemble-")
@@ -390,7 +404,7 @@ async fn assemble_one(
     //     keyed by the debug_id sentry-cli sends with the assemble
     //     request; the map bytes themselves carry no identifier.
     if leading_byte(assembled.path()).await == Some(b'[') {
-        return assemble_dart_symbol_map(state, project_id, checksum, entry, assembled.path())
+        return assemble_dart_symbol_map(db, config, project_id, checksum, entry, assembled.path())
             .await;
     }
 
@@ -422,68 +436,9 @@ async fn assemble_one(
         })
         .unwrap_or(0);
 
-    // 5. Write each object's artifact to disk and insert DB row.
-    for obj in &processed {
-        let shard = &obj.debug_id[..2];
-        let (dir_path, target, kind) = match obj.payload {
-            ProcessedPayload::SymCache(_) => {
-                let dir = format!(
-                    "{}/native/{}/{}",
-                    state.config.artifacts_dir, shard, obj.debug_id
-                );
-                let target = format!("{dir}/{}.symc", obj.arch);
-                (dir, target, "native")
-            }
-            ProcessedPayload::SourceBundle => {
-                let dir = format!("{}/sources/{}", state.config.artifacts_dir, shard);
-                let target = format!("{dir}/{}.zip", obj.debug_id);
-                (dir, target, "source_bundle")
-            }
-        };
-
-        match &obj.payload {
-            ProcessedPayload::SymCache(bytes) => {
-                if let Err(e) = write_atomic(&dir_path, &target, bytes.clone()).await {
-                    return Err(format!("write {target}: {e}"));
-                }
-                native_symbolication::invalidate_symcache_path(&target);
-            }
-            ProcessedPayload::SourceBundle => {
-                if let Err(e) = copy_atomic(assembled.path(), &dir_path, &target).await {
-                    return Err(format!("copy {target}: {e}"));
-                }
-            }
-        }
-
-        let result = sqlx::query(
-            "INSERT INTO artifact_debug_ids \
-                 (debug_id, project_id, release_id, file_path, source_name, arch, code_id, kind) \
-             VALUES (?, ?, NULL, ?, ?, ?, ?, ?) \
-             ON CONFLICT(debug_id, kind) DO UPDATE SET \
-                 project_id = excluded.project_id, \
-                 release_id = excluded.release_id, \
-                 file_path = excluded.file_path, \
-                 source_name = excluded.source_name, \
-                 arch = excluded.arch, \
-                 code_id = excluded.code_id",
-        )
-        .bind(&obj.debug_id)
-        .bind(project_id)
-        .bind(&target)
-        .bind(&obj.source_name)
-        .bind(&obj.arch)
-        .bind(&obj.code_id)
-        .bind(kind)
-        .execute(state.db.writer())
-        .await;
-        if let Err(e) = result {
-            warn!("artifact_debug_ids insert failed: {e}");
-            return Err(format!("db: {e}"));
-        }
-    }
-
+    // Build the response before moving the processed payloads into storage.
     let primary = &processed[primary_idx];
-    Ok(AssembleResponse {
+    let response = AssembleResponse {
         state: AssembleState::Ok,
         missing_chunks: Vec::new(),
         detail: None,
@@ -494,9 +449,46 @@ async fn assemble_one(
             cpu_name: primary.arch.clone(),
             sha1: checksum.to_ascii_lowercase(),
             data: AssembleDifData {
-                features: primary.features.clone(),
+                features: primary
+                    .features
+                    .iter()
+                    .map(|value| (*value).to_string())
+                    .collect(),
             },
         }),
+    };
+    let mut artifacts = Vec::with_capacity(processed.len());
+    for obj in processed {
+        let (kind, payload) = match obj.payload {
+            ProcessedPayload::SymCache(bytes) => ("native", ArtifactPayload::Bytes(bytes)),
+            ProcessedPayload::SourceBundle => {
+                ("source_bundle", ArtifactPayload::File(assembled.path()))
+            }
+        };
+        store_artifact(
+            db,
+            &config.artifacts_dir,
+            ArtifactMetadata {
+                project_id,
+                release_id: None,
+                debug_id: &obj.debug_id,
+                arch: &obj.arch,
+                code_id: obj.code_id.as_deref(),
+                source_name: &obj.source_name,
+                kind,
+            },
+            payload,
+        )
+        .await?;
+        artifacts.push(AssemblyArtifact {
+            debug_id: obj.debug_id,
+            arch: obj.arch,
+            kind: kind.to_string(),
+        });
+    }
+    Ok(AssemblyResult {
+        response,
+        artifacts,
     })
 }
 
@@ -522,12 +514,13 @@ async fn leading_byte(path: &Path) -> Option<u8> {
 /// `dart_symbol_map` kind; `src/worker/dart_symbol_map.rs` applies it
 /// to obfuscated Dart events at processing time.
 async fn assemble_dart_symbol_map(
-    state: &AppState,
+    db: &DbPool,
+    config: &Config,
     project_id: i64,
     checksum: &str,
     entry: &AssembleEntry,
     assembled_path: &Path,
-) -> Result<AssembleResponse, String> {
+) -> Result<AssemblyResult, String> {
     let debug_id = entry
         .debug_id
         .as_deref()
@@ -553,54 +546,47 @@ async fn assemble_dart_symbol_map(
         return Err("dartsymbolmap array must have an even number of elements".to_string());
     }
 
-    let shard = &debug_id[..2];
-    let dir = format!("{}/dartsymbolmaps/{}", state.config.artifacts_dir, shard);
-    let target = format!("{dir}/{debug_id}.json");
-    copy_atomic(assembled_path, &dir, &target)
-        .await
-        .map_err(|e| format!("copy {target}: {e}"))?;
-    dart_symbol_map::invalidate_map_path(&target);
-
     let object_name = entry
         .name
         .clone()
         .unwrap_or_else(|| "dartsymbolmap.json".to_string());
-    sqlx::query(
-        "INSERT INTO artifact_debug_ids \
-             (debug_id, project_id, release_id, file_path, source_name, arch, code_id, kind) \
-         VALUES (?, ?, NULL, ?, ?, ?, NULL, ?) \
-         ON CONFLICT(debug_id, kind) DO UPDATE SET \
-             project_id = excluded.project_id, \
-             release_id = excluded.release_id, \
-             file_path = excluded.file_path, \
-             source_name = excluded.source_name, \
-             arch = excluded.arch, \
-             code_id = excluded.code_id",
+    store_artifact(
+        db,
+        &config.artifacts_dir,
+        ArtifactMetadata {
+            project_id,
+            release_id: None,
+            debug_id: &debug_id,
+            arch: "any",
+            code_id: None,
+            source_name: &object_name,
+            kind: dart_symbol_map::KIND,
+        },
+        ArtifactPayload::Bytes(bytes),
     )
-    .bind(&debug_id)
-    .bind(project_id)
-    .bind(&target)
-    .bind(&object_name)
-    .bind("any")
-    .bind(dart_symbol_map::KIND)
-    .execute(state.db.writer())
-    .await
-    .map_err(|e| format!("db: {e}"))?;
+    .await?;
 
-    Ok(AssembleResponse {
-        state: AssembleState::Ok,
-        missing_chunks: Vec::new(),
-        detail: None,
-        dif: Some(AssembleDif {
-            uuid: hyphenate_debug_id(&debug_id),
-            debug_id: hyphenate_debug_id(&debug_id),
-            object_name,
-            cpu_name: "any".to_string(),
-            sha1: checksum.to_ascii_lowercase(),
-            data: AssembleDifData {
-                features: vec!["mapping"],
-            },
-        }),
+    Ok(AssemblyResult {
+        response: AssembleResponse {
+            state: AssembleState::Ok,
+            missing_chunks: Vec::new(),
+            detail: None,
+            dif: Some(AssembleDif {
+                uuid: hyphenate_debug_id(&debug_id),
+                debug_id: hyphenate_debug_id(&debug_id),
+                object_name,
+                cpu_name: "any".to_string(),
+                sha1: checksum.to_ascii_lowercase(),
+                data: AssembleDifData {
+                    features: vec!["mapping".to_string()],
+                },
+            }),
+        },
+        artifacts: vec![AssemblyArtifact {
+            debug_id,
+            arch: "any".to_string(),
+            kind: dart_symbol_map::KIND.to_string(),
+        }],
     })
 }
 

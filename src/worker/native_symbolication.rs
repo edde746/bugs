@@ -6,6 +6,7 @@
 //! debug_id (populated by `src/api/dsyms.rs`), and mutate
 //! `frame.function` / `frame.filename` / `frame.lineno` in place.
 
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
@@ -42,9 +43,8 @@ pub enum NativeSymbolicationOutcome {
 /// file_path → mmap. Byte-capped because an mmap handle's "cost" is its
 /// length in bytes (faulted pages count toward RSS on access); a pure
 /// entry-count cap would let a handful of large dSYMs map hundreds of
-/// MB. Invalidated explicitly on upload via `invalidate_symcache_path`;
-/// atomic rename-over means an unevicted entry would otherwise keep
-/// mapping the replaced inode's stale bytes.
+/// MB. Artifact paths are immutable; upgrading the canonical DB pointer
+/// opens a new mapping without invalidating readers of the previous file.
 static NATIVE_CACHE: Lazy<Mutex<ByteCappedLru<String, Arc<Mmap>>>> = Lazy::new(|| {
     Mutex::new(ByteCappedLru::new(
         NonZeroUsize::new(64).unwrap(),
@@ -61,20 +61,11 @@ pub fn configure_cache(cfg: &SymbolicationConfig) {
         .resize(cap, bytes);
 }
 
-/// Drop any mmap cached at `file_path`. The upload handler calls this
-/// after a successful atomic rename so subsequent lookups re-open the
-/// new inode instead of reading stale bytes from the old mapping.
-pub fn invalidate_symcache_path(file_path: &str) {
-    NATIVE_CACHE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .pop(&file_path.to_string());
-}
-
 /// Parsed image from `debug_meta.images[*]`.
 #[derive(Debug, Clone)]
 struct DebugImage {
     debug_id: String,
+    arch: Option<String>,
     image_addr: u64,
     image_size: u64,
     code_file: Option<String>,
@@ -149,8 +140,18 @@ fn parse_images(debug_meta: Option<&serde_json::Value>) -> Option<Vec<DebugImage
             .get("type")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
+        let arch = img
+            .get("arch")
+            .and_then(|v| v.as_str())
+            .filter(|arch| !arch.is_empty())
+            .map(|arch| {
+                arch.parse::<symbolic::common::Arch>()
+                    .map(|arch| arch.name().to_string())
+                    .unwrap_or_else(|_| arch.to_string())
+            });
         out.push(DebugImage {
             debug_id,
+            arch,
             image_addr,
             image_size,
             code_file,
@@ -201,11 +202,13 @@ fn has_addr(f: &StackFrame) -> bool {
         .unwrap_or(false)
 }
 
+type DifRows = HashMap<String, HashMap<String, String>>;
+
 async fn load_dif_rows(
     db: &DbPool,
     project_id: i64,
     debug_ids: &[String],
-) -> Result<std::collections::HashMap<String, String>, sqlx::Error> {
+) -> Result<DifRows, sqlx::Error> {
     if debug_ids.is_empty() {
         return Ok(Default::default());
     }
@@ -213,20 +216,24 @@ async fn load_dif_rows(
         .collect::<Vec<_>>()
         .join(",");
     let sql = format!(
-        "SELECT debug_id, file_path FROM artifact_debug_ids \
+        "SELECT debug_id, arch, file_path FROM artifact_debug_ids \
          WHERE project_id = ? AND kind = 'native' AND debug_id IN ({placeholders})"
     );
-    let mut q = sqlx::query_as::<_, (String, String)>(&sql).bind(project_id);
+    let mut q = sqlx::query_as::<_, (String, String, String)>(&sql).bind(project_id);
     for id in debug_ids {
         q = q.bind(id);
     }
-    Ok(q.fetch_all(db.reader()).await?.into_iter().collect())
+    let mut rows = DifRows::new();
+    for (debug_id, arch, path) in q.fetch_all(db.reader()).await? {
+        rows.entry(debug_id).or_default().insert(arch, path);
+    }
+    Ok(rows)
 }
 
 fn lookup_frames(
     event: &mut SentryEvent,
     images: &[DebugImage],
-    dif_rows: &std::collections::HashMap<String, String>,
+    dif_rows: &DifRows,
 ) -> (usize, usize) {
     let mut resolved = 0;
     let mut total = 0;
@@ -266,19 +273,11 @@ fn lookup_frames(
     (resolved, total)
 }
 
-fn resolve_one(
-    frame: &mut StackFrame,
-    images: &[DebugImage],
-    dif_rows: &std::collections::HashMap<String, String>,
-) -> bool {
+fn resolve_one(frame: &mut StackFrame, images: &[DebugImage], dif_rows: &DifRows) -> bool {
     try_resolve(frame, images, dif_rows).is_some()
 }
 
-fn try_resolve(
-    frame: &mut StackFrame,
-    images: &[DebugImage],
-    dif_rows: &std::collections::HashMap<String, String>,
-) -> Option<()> {
+fn try_resolve(frame: &mut StackFrame, images: &[DebugImage], dif_rows: &DifRows) -> Option<()> {
     if frame
         .function
         .as_deref()
@@ -294,7 +293,14 @@ fn try_resolve(
     let iaddr = u64::from_str_radix(iaddr_str, 16).ok()?;
 
     let image = find_containing_image(iaddr, images)?;
-    let file_path = dif_rows.get(&image.debug_id)?;
+    let candidates = dif_rows.get(&image.debug_id)?;
+    let file_path = match image.arch.as_deref() {
+        Some(arch) => candidates.get(arch).or_else(|| candidates.get(""))?,
+        // Without an architecture, never pick arbitrarily between different
+        // slices of the same debug ID.
+        None if candidates.len() == 1 => candidates.values().next()?,
+        None => return None,
+    };
 
     // SymCache stores function entries as offsets from the image's
     // link-time base. At runtime the image is loaded at image_addr (with
@@ -304,6 +310,11 @@ fn try_resolve(
 
     let mmap = get_mmap(file_path)?;
     let symcache = SymCache::parse(&mmap[..]).ok()?;
+    if let Some(arch) = image.arch.as_deref()
+        && symcache.arch().name() != arch
+    {
+        return None;
+    }
     let mut locs = symcache.lookup(relative);
     let loc = locs.next()?;
 

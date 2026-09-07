@@ -282,9 +282,307 @@ async fn test_dsym_upload_over_limit_returns_413() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn test_rich_dsym_survives_stripped_uploads_and_project_isolation() {
+    let fixture = build_fixture();
+    let rich = std::fs::read(&fixture.dsym_path).unwrap();
+    let stripped = std::fs::read(&fixture.bin_path).unwrap();
+    let (base_url, db_path, handle) = start_test_server().await;
+    let client = reqwest::Client::new();
+    let pool = SqlitePool::connect_with(
+        SqliteConnectOptions::from_str(&db_path)
+            .unwrap()
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+    )
+    .await
+    .unwrap();
+
+    let rich_first = create_project(&client, &base_url, "Rich First", "rich-first").await;
+    upload_fixture(&client, &base_url, "rich-first", &rich).await;
+    let original_path = assert_canonical_source(&pool, rich_first, &fixture).await;
+    let original_bytes = std::fs::read(&original_path).unwrap();
+
+    // Emulate a migrated production row: an older mutable path, no measured
+    // quality or digest, and a historically nullable architecture.
+    let legacy_path = fixture._dir.path().join("legacy.symc");
+    std::fs::write(&legacy_path, &original_bytes).unwrap();
+    sqlx::query(
+        "UPDATE artifact_debug_ids SET file_path = ?, arch = '', quality_lines = NULL, \
+         quality_files = NULL, quality_functions = NULL, content_hash = NULL WHERE project_id = ?",
+    )
+    .bind(legacy_path.to_str().unwrap())
+    .bind(rich_first)
+    .execute(&pool)
+    .await
+    .unwrap();
+    upload_fixture(&client, &base_url, "rich-first", &stripped).await;
+    assert_eq!(
+        assert_canonical_source(&pool, rich_first, &fixture).await,
+        legacy_path.to_str().unwrap(),
+        "an unmeasured historical dSYM must not be downgraded",
+    );
+
+    let stripped_first =
+        create_project(&client, &base_url, "Stripped First", "stripped-first").await;
+    upload_fixture(&client, &base_url, "stripped-first", &stripped).await;
+    let stripped_path: String = sqlx::query_scalar(
+        "SELECT file_path FROM artifact_debug_ids WHERE project_id = ? AND kind = 'native'",
+    )
+    .bind(stripped_first)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let stripped_cache = std::fs::read(&stripped_path).unwrap();
+    let stripped_symcache = symbolic::symcache::SymCache::parse(&stripped_cache).unwrap();
+    let stripped_location = stripped_symcache
+        .lookup(fixture.function_offset)
+        .next()
+        .unwrap();
+    assert_eq!(
+        stripped_location.line(),
+        0,
+        "fixture binary must have no DWARF lines"
+    );
+    let release_id: i64 =
+        sqlx::query_scalar("INSERT INTO releases(version) VALUES ('fixture-release') RETURNING id")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    sqlx::query("INSERT INTO release_projects(release_id, project_id) VALUES (?, ?)")
+        .bind(release_id)
+        .bind(stripped_first)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE artifact_debug_ids SET release_id = ? WHERE project_id = ?")
+        .bind(release_id)
+        .bind(stripped_first)
+        .execute(&pool)
+        .await
+        .unwrap();
+    upload_fixture(&client, &base_url, "stripped-first", &rich).await;
+    assert_canonical_source(&pool, stripped_first, &fixture).await;
+    let preserved_release: i64 = sqlx::query_scalar(
+        "SELECT release_id FROM artifact_debug_ids WHERE project_id = ? AND kind = 'native'",
+    )
+    .bind(stripped_first)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        preserved_release, release_id,
+        "richer upload must retain the original release"
+    );
+    assert_eq!(
+        std::fs::read(&stripped_path).unwrap(),
+        stripped_cache,
+        "upgrading the canonical pointer must not mutate an existing payload",
+    );
+
+    let concurrent = create_project(&client, &base_url, "Concurrent", "concurrent").await;
+    tokio::join!(
+        upload_fixture(&client, &base_url, "concurrent", &rich),
+        upload_fixture(&client, &base_url, "concurrent", &stripped),
+        upload_fixture(&client, &base_url, "concurrent", &rich),
+        upload_fixture(&client, &base_url, "concurrent", &stripped),
+    );
+    assert_canonical_source(&pool, concurrent, &fixture).await;
+
+    let isolated = create_project(&client, &base_url, "Isolated", "isolated").await;
+    upload_fixture(&client, &base_url, "isolated", &stripped).await;
+    let isolated_path: String = sqlx::query_scalar(
+        "SELECT file_path FROM artifact_debug_ids WHERE project_id = ? AND kind = 'native'",
+    )
+    .bind(isolated)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // The same debug ID can have another architecture whose payload is absent.
+    // Exact architecture lookup must still use the rich arm64 cache.
+    sqlx::query(
+        "INSERT INTO artifact_debug_ids(project_id, debug_id, arch, kind, file_path) \
+         VALUES (?, ?, 'x86_64', 'native', ?)",
+    )
+    .bind(concurrent)
+    .bind(&fixture.debug_id)
+    .bind(
+        fixture
+            ._dir
+            .path()
+            .join("absent-x86.symc")
+            .to_str()
+            .unwrap(),
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let keys: Vec<serde_json::Value> = client
+        .get(format!(
+            "{base_url}/api/internal/projects/{concurrent}/keys"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let event_id = "1234567890abcdef1234567890abcdef";
+    let event = serde_json::json!({
+        "event_id": event_id, "platform": "native", "level": "error",
+        "exception": {"values": [{"type": "SIGSEGV", "stacktrace": {"frames": [{
+            "instruction_addr": format!("0x{:x}", 0x100000000u64 + fixture.function_offset)
+        }]}}]},
+        "debug_meta": {"images": [{
+            "debug_id": fixture.debug_id, "arch": "arm64", "type": "macho",
+            "image_addr": "0x100000000", "image_size": 0x4000,
+            "code_file": "/fixture"
+        }]}
+    });
+    send_event(
+        &client,
+        &base_url,
+        concurrent,
+        keys[0]["public_key"].as_str().unwrap(),
+        event_id,
+        &event,
+    )
+    .await;
+    let row = poll_event_row(&db_path, concurrent, event_id).await;
+    let data: serde_json::Value = serde_json::from_str(&row.data).unwrap();
+    let frame = &data["exception"]["values"][0]["stacktrace"]["frames"][0];
+    assert!(
+        frame["filename"].as_str().unwrap().ends_with("fixture.c"),
+        "{frame}"
+    );
+    assert_eq!(frame["lineno"], 1, "{frame}");
+    let isolated_bytes = std::fs::read(isolated_path).unwrap();
+    let isolated_cache = symbolic::symcache::SymCache::parse(&isolated_bytes).unwrap();
+    assert_eq!(
+        isolated_cache
+            .lookup(fixture.function_offset)
+            .next()
+            .unwrap()
+            .line(),
+        0
+    );
+    assert_canonical_source(&pool, rich_first, &fixture).await;
+    assert_canonical_source(&pool, stripped_first, &fixture).await;
+    assert_eq!(std::fs::read(original_path).unwrap(), original_bytes);
+    handle.abort();
+}
+
+async fn upload_fixture(client: &reqwest::Client, base_url: &str, slug: &str, bytes: &[u8]) {
+    let boundary = "----bugs-test-canonical";
+    let response = client
+        .post(format!(
+            "{base_url}/api/0/projects/default/{slug}/files/dsyms/"
+        ))
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(dsym_upload_body(boundary, "fixture", bytes))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    let response: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(response["errors"], serde_json::json!([]), "{response}");
+}
+
+async fn assert_canonical_source(pool: &SqlitePool, project_id: i64, fixture: &Fixture) -> String {
+    let path: String = sqlx::query_scalar(
+        "SELECT file_path FROM artifact_debug_ids \
+         WHERE project_id = ? AND debug_id = ? AND arch = 'arm64' AND kind = 'native'",
+    )
+    .bind(project_id)
+    .bind(&fixture.debug_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    let cache = symbolic::symcache::SymCache::parse(&bytes).unwrap();
+    let location = cache
+        .lookup(fixture.function_offset)
+        .next()
+        .expect("fixture address resolves");
+    assert!(location.function().name().contains("bugs_native_fixture"));
+    assert!(location.file().unwrap().full_path().ends_with("fixture.c"));
+    assert_eq!(
+        location.line(),
+        1,
+        "rich DWARF source line must survive all upload orders"
+    );
+    path
+}
+
+#[tokio::test]
+async fn test_artifact_identity_migration_preserves_historical_ownership() {
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    sqlx::raw_sql(include_str!("../migrations/001_initial_schema.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql(include_str!(
+        "../migrations/017_debug_ids_project_and_arch.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(
+        "INSERT INTO projects(id, name, slug) VALUES (1, 'One', 'one'), (2, 'Two', 'two'); \
+         INSERT INTO releases(id, version) VALUES (1, 'old-release'); \
+         INSERT INTO release_projects(release_id, project_id) VALUES (1, 1), (1, 2); \
+         INSERT INTO artifact_debug_ids(id, debug_id, release_id, file_path, kind) \
+          VALUES (10, 'shared', 1, '/old/shared.symc', 'native'), \
+                 (20, 'unowned', NULL, '/old/map', 'sourcemap');",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(include_str!("../migrations/019_artifact_identity.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let shared: Vec<(i64, i64, String, String, Option<String>, Option<i64>)> = sqlx::query_as(
+        "SELECT project_id, release_id, file_path, arch, source_name, quality_lines \
+         FROM artifact_debug_ids WHERE debug_id = 'shared' ORDER BY project_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        shared,
+        vec![
+            (1, 1, "/old/shared.symc".into(), "".into(), None, None),
+            (2, 1, "/old/shared.symc".into(), "".into(), None, None),
+        ]
+    );
+    let unowned: (i64, Option<i64>, Option<i64>, String) = sqlx::query_as(
+        "SELECT id, project_id, release_id, file_path FROM artifact_debug_ids WHERE debug_id = 'unowned'",
+    ).fetch_one(&pool).await.unwrap();
+    assert_eq!(unowned, (20, None, None, "/old/map".into()));
+    // Removing one project must not discard a formerly global artifact from
+    // another project on the same release.
+    sqlx::query("DELETE FROM projects WHERE id = 1")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let survivor: (i64, i64, String) = sqlx::query_as(
+        "SELECT project_id, release_id, file_path FROM artifact_debug_ids WHERE debug_id = 'shared'",
+    ).fetch_one(&pool).await.unwrap();
+    assert_eq!(survivor, (2, 1, "/old/shared.symc".into()));
+}
+
 // --- Helpers -------------------------------------------------------
 
 struct Fixture {
+    _dir: tempfile::TempDir,
+    bin_path: PathBuf,
     dsym_path: PathBuf,
     debug_id: String,
     /// Offset of bugs_native_fixture relative to the Mach-O image base 0x100000000.
@@ -292,8 +590,8 @@ struct Fixture {
 }
 
 fn build_fixture() -> Fixture {
-    let dir = PathBuf::from("/tmp/bugs-native-fixture");
-    std::fs::create_dir_all(&dir).unwrap();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let dir = temp_dir.path();
 
     let src = dir.join("fixture.c");
     std::fs::write(
@@ -305,10 +603,11 @@ fn build_fixture() -> Fixture {
 
     let obj = dir.join("fixture.o");
     let bin = dir.join("fixture");
-    let _ = std::fs::remove_dir_all(dir.join("fixture.dSYM"));
 
     run(&[
         "cc",
+        "-arch",
+        "arm64",
         "-g",
         "-O0",
         "-c",
@@ -318,6 +617,8 @@ fn build_fixture() -> Fixture {
     ]);
     run(&[
         "cc",
+        "-arch",
+        "arm64",
         "-g",
         "-O0",
         "-o",
@@ -359,8 +660,11 @@ fn build_fixture() -> Fixture {
     }
     let abs_addr = abs_addr.expect("nm did not find _bugs_native_fixture");
     let function_offset = abs_addr - 0x100000000;
+    run(&["strip", "-S", bin.to_str().unwrap()]);
 
     Fixture {
+        _dir: temp_dir,
+        bin_path: bin,
         dsym_path: dsym,
         debug_id: hex,
         function_offset,

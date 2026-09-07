@@ -105,6 +105,33 @@ Configuration is loaded from (highest precedence first):
 |----------|---------|-------------|
 | `BUGS_UPLOADS__MAX_BYTES` | `2 GB` | Max size for admin-authenticated uploads (dSYMs, release artifacts) |
 | `BUGS_UPLOADS__CHUNK_RETENTION_HOURS` | `12` | Hours to keep chunk-upload blobs after last use; active uploads refresh this TTL |
+| `BUGS_UPLOADS__ASSEMBLY_CONCURRENCY` | `1` | Maximum simultaneous DIF conversions per process; independent of event workers |
+| `BUGS_UPLOADS__MAX_WAIT_SECS` | `600` | Advertised client polling budget for DIF processing; not an HTTP connection timeout |
+
+### Native and Dart symbol uploads
+
+The DIF assemble endpoint returns `not_found` with missing chunk hashes, `assembling`
+while queued or processing, and `ok` or `error` on completion. Clients must wait for
+processing (`sentry-cli debug-files upload --wait-for 600`) to detect conversion
+failures. Expensive hashing and SymCache conversion do not run in the HTTP handler.
+
+Assembly jobs and completed receipts are stored in SQLite. Admitted jobs pin their
+chunks with hard links under the artifacts directory, so chunk retention cannot
+remove active inputs. Workers renew 60-second leases; unfinished jobs are reclaimed
+after a crashed worker's lease expires. Completed receipts survive chunk expiry and
+check the current canonical artifact before returning success. Failed attempts stay
+visible for 60 seconds before a new request may retry them.
+
+Native artifacts are selected by project, debug ID, architecture and kind. Immutable
+content-addressed files prevent concurrent replacement of mapped caches; measured
+debug/line information takes precedence over stripped symbols. Keep assembly
+concurrency at one on memory-constrained deployments: chunk-upload concurrency does
+not limit conversion memory.
+
+Before upgrading an existing deployment, back up both the database and artifacts.
+Migrations 019–020 rebuild artifact identity and add durable assembly state;
+schema changes and migration markers commit atomically. Rolling back to an older
+binary requires the pre-upgrade backup, not just changing the image tag.
 
 ## Authentication
 

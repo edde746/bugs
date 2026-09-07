@@ -1,3 +1,4 @@
+pub mod artifact_store;
 pub mod atomic_fs;
 pub mod byte_capped_lru;
 pub mod chunk_store;
