@@ -121,6 +121,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/{project_id}/envelope", post(ingest_envelope))
         .route("/api/{project_id}/store", post(ingest_store))
         .route("/api/{project_id}/security", post(ingest_security))
+        .merge(super::minidump::routes())
         .layer(tower_http::cors::CorsLayer::permissive())
 }
 
@@ -192,24 +193,43 @@ async fn ingest_envelope(
     let event_id = extract_event_id(&data).unwrap_or_else(generate_event_id);
 
     // Store raw envelope (use key.project_id, not URL param, as source of truth)
+    persist_envelope(&state, key.project_id, &event_id, &data)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Storage failed: {e}"),
+            )
+        })?;
+
+    Ok((StatusCode::OK, Json(json!({ "id": event_id }))))
+}
+
+/// Stores a raw envelope and queues it for processing. Duplicate
+/// submissions (same project/event id) are ignored — the existing
+/// envelope is already queued or being processed, and the poller
+/// handles recovery.
+pub(super) async fn persist_envelope(
+    state: &crate::AppState,
+    project_id: i64,
+    event_id: &str,
+    data: &[u8],
+) -> Result<(), sqlx::Error> {
     let insert_result = sqlx::query(
         "INSERT OR IGNORE INTO event_envelopes (project_id, event_id, body, state) VALUES (?, ?, ?, 'pending')"
     )
-    .bind(key.project_id)
-    .bind(&event_id)
-    .bind(&data)
+    .bind(project_id)
+    .bind(event_id)
+    .bind(data)
     .execute(state.db.writer())
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Storage failed: {e}")))?;
+    .await?;
 
     // Only queue for processing if we actually inserted a new envelope.
-    // Duplicate submissions (rows_affected == 0) are ignored — the existing
-    // envelope is already queued or being processed, and the poller handles recovery.
     if insert_result.rows_affected() > 0 {
         let envelope_id: Option<(i64,)> =
             sqlx::query_as("SELECT id FROM event_envelopes WHERE project_id = ? AND event_id = ?")
-                .bind(key.project_id)
-                .bind(&event_id)
+                .bind(project_id)
+                .bind(event_id)
                 .fetch_optional(state.db.reader())
                 .await
                 .unwrap_or(None);
@@ -218,8 +238,7 @@ async fn ingest_envelope(
             let _ = state.worker_tx.try_send(id);
         }
     }
-
-    Ok((StatusCode::OK, Json(json!({ "id": event_id }))))
+    Ok(())
 }
 
 async fn ingest_store(

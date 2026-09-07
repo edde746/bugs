@@ -17,7 +17,11 @@ struct Asset;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/assets/{*path}", get(serve_asset))
-        .fallback(get(fallback))
+        // Plain (method-agnostic) fallback: wrapping it in `get(...)`
+        // would short-circuit every non-GET unmatched request to a bare
+        // 405 before the /api JSON-404 branch below could run — which
+        // silently ate crashpad minidump POSTs.
+        .fallback(fallback)
 }
 
 /// Catch-all for unmatched routes. Dispatches API paths to a JSON-404
