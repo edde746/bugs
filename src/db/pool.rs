@@ -189,6 +189,7 @@ impl DbPool {
             include_str!("../../migrations/018_event_attachments.sql"),
             include_str!("../../migrations/019_artifact_identity.sql"),
             include_str!("../../migrations/020_dif_assemblies.sql"),
+            include_str!("../../migrations/021_dif_assembly_claims.sql"),
         ];
 
         for (i, sql) in migrations.iter().enumerate() {

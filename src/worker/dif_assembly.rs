@@ -24,6 +24,10 @@ use crate::util::id::{is_sha1_hex, normalize_debug_id};
 
 const LEASE_SECONDS: i64 = 60;
 const ERROR_RETENTION_SECONDS: i64 = 60;
+/// Processing attempts per job. A job is claimed again only after its worker
+/// stopped renewing the lease, almost always because the process died, so a
+/// job that keeps coming back is what kills the process.
+const MAX_CLAIMS: i64 = 3;
 
 #[derive(sqlx::FromRow)]
 struct Receipt {
@@ -40,6 +44,7 @@ struct Job {
     checksum: String,
     request_json: String,
     staging_root: String,
+    claims: i64,
 }
 
 /// A completed receipt is consulted before any staging-chunk lookup. Failed
@@ -259,11 +264,12 @@ pub(crate) fn spawn(
 async fn claim(db: &DbPool, owner: &str) -> Result<Option<Job>, sqlx::Error> {
     let now = chrono::Utc::now().timestamp();
     sqlx::query_as(
-        "UPDATE dif_assemblies SET state = 'processing', lease_owner = ?, lease_until = ?, updated_at = ? \
+        "UPDATE dif_assemblies SET state = 'processing', lease_owner = ?, lease_until = ?, updated_at = ?, \
+             claims = claims + 1 \
          WHERE id = (SELECT id FROM dif_assemblies \
              WHERE state = 'pending' OR (state = 'processing' AND lease_until < ?) \
              ORDER BY updated_at, id LIMIT 1) \
-         RETURNING id, project_id, checksum, request_json, staging_root",
+         RETURNING id, project_id, checksum, request_json, staging_root, claims",
     )
     .bind(owner)
     .bind(now + LEASE_SECONDS)
@@ -275,48 +281,17 @@ async fn claim(db: &DbPool, owner: &str) -> Result<Option<Job>, sqlx::Error> {
 
 async fn run_job(db: &DbPool, config: &Arc<Config>, owner: &str, job: Job) {
     let started = std::time::Instant::now();
-    // Conversion must keep progressing while the lease task waits for SQLite's
-    // single writer. Polling both in one task can deadlock if conversion owns a
-    // transaction when the heartbeat tries to acquire that same connection.
-    let process_db = db.clone();
-    let process_config = config.clone();
-    let request_json = job.request_json.clone();
-    let staging_root = job.staging_root.clone();
-    let checksum = job.checksum.clone();
-    let project_id = job.project_id;
-    let mut processing = tokio::spawn(async move {
-        let entry: AssembleEntry = serde_json::from_str(&request_json)
-            .map_err(|e| format!("decode assembly request: {e}"))?;
-        assemble_one(
-            &process_db,
-            &process_config,
-            project_id,
-            &staging_root,
-            &checksum,
-            &entry,
-        )
-        .await
-    });
-    let mut heartbeat = tokio::time::interval(Duration::from_secs(10));
-    let result = loop {
-        tokio::select! {
-            result = &mut processing => break result.unwrap_or_else(|e| Err(format!("assembly task: {e}"))),
-            _ = heartbeat.tick() => {
-                let renewed = sqlx::query(
-                    "UPDATE dif_assemblies SET lease_until = ? WHERE id = ? AND lease_owner = ? AND state = 'processing'",
-                )
-                .bind(chrono::Utc::now().timestamp() + LEASE_SECONDS)
-                .bind(&job.id)
-                .bind(owner)
-                .execute(db.writer()).await;
-                if !matches!(&renewed, Ok(row) if row.rows_affected() == 1) {
-                    warn!(job = %job.id, "assembly lease lost; leaving recovery to queue");
-                    // spawn_blocking cannot be aborted. Keep this worker's
-                    // capacity occupied until its conversion really finishes.
-                    let _ = processing.await;
-                    return;
-                }
-            }
+    let result = if job.claims > MAX_CLAIMS {
+        // Converting this file again would most likely take the process down
+        // again (an out-of-memory kill leaves no other trace).
+        Err(format!(
+            "processing was interrupted {} times; giving up (the server likely ran out of memory converting this file)",
+            job.claims - 1
+        ))
+    } else {
+        match process_with_lease(db, config, owner, &job).await {
+            Some(result) => result,
+            None => return,
         }
     };
     let (state, result) = match result {
@@ -358,6 +333,60 @@ async fn run_job(db: &DbPool, config: &Arc<Config>, owner: &str, job: Job) {
         }
         Ok(_) => warn!(job = %job.id, "assembly finished after ownership changed"),
         Err(e) => warn!(job = %job.id, "publish assembly result: {e}"),
+    }
+}
+
+/// Converts the job while renewing its lease; `None` when the lease was lost
+/// and recovery belongs to whichever worker claims the job next.
+async fn process_with_lease(
+    db: &DbPool,
+    config: &Arc<Config>,
+    owner: &str,
+    job: &Job,
+) -> Option<Result<AssemblyResult, String>> {
+    // Conversion must keep progressing while the lease task waits for SQLite's
+    // single writer. Polling both in one task can deadlock if conversion owns a
+    // transaction when the heartbeat tries to acquire that same connection.
+    let process_db = db.clone();
+    let process_config = config.clone();
+    let request_json = job.request_json.clone();
+    let staging_root = job.staging_root.clone();
+    let checksum = job.checksum.clone();
+    let project_id = job.project_id;
+    let mut processing = tokio::spawn(async move {
+        let entry: AssembleEntry = serde_json::from_str(&request_json)
+            .map_err(|e| format!("decode assembly request: {e}"))?;
+        assemble_one(
+            &process_db,
+            &process_config,
+            project_id,
+            &staging_root,
+            &checksum,
+            &entry,
+        )
+        .await
+    });
+    let mut heartbeat = tokio::time::interval(Duration::from_secs(10));
+    loop {
+        tokio::select! {
+            result = &mut processing => return Some(result.unwrap_or_else(|e| Err(format!("assembly task: {e}")))),
+            _ = heartbeat.tick() => {
+                let renewed = sqlx::query(
+                    "UPDATE dif_assemblies SET lease_until = ? WHERE id = ? AND lease_owner = ? AND state = 'processing'",
+                )
+                .bind(chrono::Utc::now().timestamp() + LEASE_SECONDS)
+                .bind(&job.id)
+                .bind(owner)
+                .execute(db.writer()).await;
+                if !matches!(&renewed, Ok(row) if row.rows_affected() == 1) {
+                    warn!(job = %job.id, "assembly lease lost; leaving recovery to queue");
+                    // spawn_blocking cannot be aborted. Keep this worker's
+                    // capacity occupied until its conversion really finishes.
+                    let _ = processing.await;
+                    return None;
+                }
+            }
+        }
     }
 }
 
@@ -529,6 +558,52 @@ mod tests {
             AssembleState::Ok
         ));
         assert!(!Path::new(&job.staging_root).exists());
+    }
+
+    #[tokio::test]
+    async fn a_job_that_keeps_killing_its_worker_fails_instead_of_looping() {
+        let fixture = Fixture::new().await;
+        let (checksum, entry) = fixture.upload(br#"["ReadableError","a"]"#);
+        fixture.request(&checksum, &entry).await;
+
+        // Three workers each die mid-conversion (e.g. OOM-killed).
+        let mut staging_root = String::new();
+        for attempt in 0..MAX_CLAIMS {
+            let job = claim(&fixture.db, &format!("dead-{attempt}"))
+                .await
+                .unwrap()
+                .expect("an interrupted job is claimable again");
+            assert_eq!(job.claims, attempt + 1);
+            sqlx::query("UPDATE dif_assemblies SET lease_until = 0 WHERE id = ?")
+                .bind(&job.id)
+                .execute(fixture.db.writer())
+                .await
+                .unwrap();
+            staging_root = job.staging_root;
+        }
+
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let workers = spawn(fixture.db.clone(), fixture.config.clone(), shutdown_rx);
+        let response = fixture.finish(&checksum, &entry).await;
+        shutdown_tx.send(true).unwrap();
+        for worker in workers {
+            worker.await.unwrap();
+        }
+
+        assert!(
+            matches!(response.state, AssembleState::Error),
+            "{response:?}"
+        );
+        let detail = response.detail.unwrap_or_default();
+        assert!(detail.contains("interrupted 3 times"), "{detail}");
+        // Not converted: nothing was stored for the map's debug ID.
+        let stored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM artifact_debug_ids")
+            .fetch_one(fixture.db.reader())
+            .await
+            .unwrap();
+        assert_eq!(stored, 0);
+        assert!(!Path::new(&staging_root).exists());
+        assert!(claim(&fixture.db, "next").await.unwrap().is_none());
     }
 
     #[tokio::test]
