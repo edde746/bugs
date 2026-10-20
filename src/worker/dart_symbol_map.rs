@@ -202,8 +202,9 @@ async fn load_map(file_path: &str) -> Option<SharedSymbolMap> {
 fn parse_map(bytes: &[u8]) -> Result<HashMap<String, String>, serde_json::Error> {
     let entries: Vec<serde_json::Value> = serde_json::from_slice(bytes)?;
     let mut map = HashMap::with_capacity(entries.len() / 2);
-    for pair in entries.chunks_exact(2) {
-        if let (Some(deobfuscated), Some(obfuscated)) = (pair[0].as_str(), pair[1].as_str()) {
+    for [deobfuscated, obfuscated] in entries.as_chunks::<2>().0 {
+        if let (Some(deobfuscated), Some(obfuscated)) = (deobfuscated.as_str(), obfuscated.as_str())
+        {
             map.insert(obfuscated.to_string(), deobfuscated.to_string());
         }
     }
