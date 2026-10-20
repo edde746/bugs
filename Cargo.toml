@@ -20,8 +20,8 @@ serde_json = "1"
 # Source maps
 sourcemap = "9"
 
-# Native debug info (DIF) parsing, SymCache, demangling
-symbolic = { version = "12", features = ["debuginfo", "demangle", "symcache"] }
+# Native debug info (DIF) parsing, SymCache, CFI, demangling
+symbolic = { version = "12", features = ["cfi", "debuginfo", "demangle", "symcache"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 memmap2 = "0.9"
 
@@ -64,6 +64,11 @@ minidump-unwind = "0.27.0"
 async-trait = "0.1.92"
 multer = { version = "3.1.0", default-features = false }
 futures-util = { version = "0.3.34", default-features = false }
+
+[dev-dependencies]
+# Synthesized minidumps for stackwalk tests (rust-minidump's own test helpers)
+minidump-synth = "0.27.0"
+test-assembler = "0.1.6"
 
 [profile.release]
 strip = "symbols"

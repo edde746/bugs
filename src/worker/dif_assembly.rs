@@ -14,7 +14,8 @@ use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 use crate::api::chunked_upload::{
-    AssembleEntry, AssembleResponse, AssembleState, AssemblyResult, assemble_one,
+    AssembleEntry, AssembleResponse, AssembleState, AssemblyResult, PROCESSING_VERSION,
+    assemble_one,
 };
 use crate::config::Config;
 use crate::db::DbPool;
@@ -78,9 +79,13 @@ pub(crate) async fn request(
                         .ok_or("assembly receipt has no result")?,
                 )
                 .map_err(|e| format!("assembly receipt: {e}"))?;
-                let mut usable = receipt.state == "ok"
-                    || receipt.updated_at + ERROR_RETENTION_SECONDS
-                        > chrono::Utc::now().timestamp();
+                // Successes from older processing lack artifacts it now
+                // derives (e.g. CFI); expire them so the client re-sends.
+                let mut usable = if receipt.state == "ok" {
+                    result.processing_version == PROCESSING_VERSION
+                } else {
+                    receipt.updated_at + ERROR_RETENTION_SECONDS > chrono::Utc::now().timestamp()
+                };
                 for artifact in &result.artifacts {
                     let path: Option<String> = sqlx::query_scalar(
                         "SELECT file_path FROM artifact_debug_ids \
@@ -323,6 +328,7 @@ async fn run_job(db: &DbPool, config: &Arc<Config>, owner: &str, job: Job) {
                 AssemblyResult {
                     response: AssembleResponse::error(detail),
                     artifacts: Vec::new(),
+                    processing_version: PROCESSING_VERSION,
                 },
             )
         }
@@ -674,6 +680,68 @@ mod tests {
             fixture.request(checksum, &entry).await.state,
             AssembleState::Error
         ));
+        shutdown_tx.send(true).unwrap();
+        for worker in workers {
+            worker.await.unwrap();
+        }
+    }
+
+    async fn artifact_kinds(db: &DbPool) -> Vec<String> {
+        sqlx::query_scalar("SELECT kind FROM artifact_debug_ids ORDER BY kind")
+            .fetch_all(db.reader())
+            .await
+            .unwrap()
+    }
+
+    /// sentry-cli never re-sends a file whose assemble state is `ok`, so a
+    /// receipt written before CFI extraction must not hide the missing cache.
+    #[tokio::test]
+    async fn receipts_from_older_processing_are_reprocessed() {
+        let fixture = Fixture::new().await;
+        let (checksum, entry) = fixture.upload(
+            b"MODULE Linux x86_64 E047CC9336C47BDC839225C0C2C7EE870 plezy\n\
+              FUNC 1000 100 0 crash_here\n\
+              STACK CFI INIT 1000 100 .cfa: $rsp 16 + .ra: .cfa -8 + ^\n",
+        );
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let workers = spawn(fixture.db.clone(), fixture.config.clone(), shutdown_rx);
+        fixture.request(&checksum, &entry).await;
+        assert!(matches!(
+            fixture.finish(&checksum, &entry).await.state,
+            AssembleState::Ok
+        ));
+        assert_eq!(artifact_kinds(&fixture.db).await, ["cfi", "native"]);
+
+        // Model the state a pre-CFI deployment left behind.
+        sqlx::query("DELETE FROM artifact_debug_ids WHERE kind = 'cfi'")
+            .execute(fixture.db.writer())
+            .await
+            .unwrap();
+        let json: String = sqlx::query_scalar("SELECT result_json FROM dif_assemblies")
+            .fetch_one(fixture.db.reader())
+            .await
+            .unwrap();
+        let mut result: serde_json::Value = serde_json::from_str(&json).unwrap();
+        result.as_object_mut().unwrap().remove("processing_version");
+        result["artifacts"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|artifact| artifact["kind"] != "cfi");
+        sqlx::query("UPDATE dif_assemblies SET result_json = ?")
+            .bind(result.to_string())
+            .execute(fixture.db.writer())
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            fixture.request(&checksum, &entry).await.state,
+            AssembleState::Assembling
+        ));
+        assert!(matches!(
+            fixture.finish(&checksum, &entry).await.state,
+            AssembleState::Ok
+        ));
+        assert_eq!(artifact_kinds(&fixture.db).await, ["cfi", "native"]);
         shutdown_tx.send(true).unwrap();
         for worker in workers {
             worker.await.unwrap();

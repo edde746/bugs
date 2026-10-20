@@ -109,11 +109,12 @@ async fn ingest_minidump(
         return Err((StatusCode::BAD_REQUEST, "invalid minidump".into()));
     }
 
-    // Stackwalk off the async executor: scanning-heuristic unwinds on a
-    // multi-MB dump are CPU-bound.
+    // Stackwalk off the async executor: unwinding a multi-MB dump is
+    // CPU-bound. Uploaded CFI for the dump's modules loads within a budget.
     let handle = tokio::runtime::Handle::current();
+    let db = state.db.clone();
     let (event_id, event, dump, upload) = tokio::task::spawn_blocking(move || {
-        let result = handle.block_on(synthesize_event(&dump, &upload));
+        let result = handle.block_on(synthesize_event(&db, project_id, &dump, &upload));
         result.map(|(event_id, event)| (event_id, event, dump, upload))
     })
     .await

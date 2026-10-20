@@ -24,15 +24,16 @@ use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha1::{Digest, Sha1};
-use symbolic::common::ByteView;
+use symbolic::common::{ByteView, DebugId};
 use symbolic::debuginfo::{Archive, Object, ObjectKind};
 use symbolic::symcache::SymCacheConverter;
 use tempfile::NamedTempFile;
 use tracing::warn;
 
 use crate::AppState;
-use crate::config::Config;
+use crate::config::{Config, UploadsConfig};
 use crate::db::DbPool;
+use crate::ingest::cfi;
 use crate::util::artifact_store::{ArtifactMetadata, ArtifactPayload, store_artifact};
 use crate::util::atomic_fs::write_atomic;
 use crate::util::chunk_store::{chunk_path, touch_chunk};
@@ -59,8 +60,14 @@ async fn chunk_options(
     State(state): State<AppState>,
     AxumPath(org): AxumPath<String>,
 ) -> Json<Value> {
-    let cfg = &state.config.uploads;
-    Json(json!({
+    Json(chunk_upload_options(&state.config.uploads, &org))
+}
+
+/// sentry-cli silently skips every PE and PDB file (no warning, "Found 0
+/// debug information files") unless `pdbs` is accepted; that capability also
+/// enables the PDB age overrides honored by `effective_debug_id`.
+fn chunk_upload_options(cfg: &UploadsConfig, org: &str) -> Value {
+    json!({
         "url": format!("/api/0/organizations/{org}/chunk-upload/"),
         "chunkSize": cfg.chunk_size_mib * 1024 * 1024,
         "chunksPerRequest": cfg.chunks_per_request,
@@ -70,8 +77,8 @@ async fn chunk_options(
         "concurrency": cfg.chunk_concurrency,
         "hashAlgorithm": "sha1",
         "compression": ["gzip"],
-        "accept": ["debug_files", "sources", "dartsymbolmap"],
-    }))
+        "accept": ["debug_files", "pdbs", "sources", "dartsymbolmap"],
+    })
 }
 
 // =====================================================================
@@ -275,10 +282,20 @@ pub(crate) struct AssemblyArtifact {
     pub kind: String,
 }
 
+/// Version of the processing behind an assembly result. Bump it whenever
+/// processing derives a new artifact from an upload: completed receipts
+/// from older processing are then reprocessed instead of reused, because
+/// sentry-cli never re-sends a file whose assemble state is `ok`.
+/// 1: CFI caches stored next to SymCaches.
+pub(crate) const PROCESSING_VERSION: u32 = 1;
+
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct AssemblyResult {
     pub response: AssembleResponse,
     pub artifacts: Vec<AssemblyArtifact>,
+    /// Receipts written before versioning read as 0.
+    #[serde(default)]
+    pub processing_version: u32,
 }
 
 async fn assemble_difs(
@@ -411,8 +428,12 @@ pub(crate) async fn assemble_one(
     // 3. Parse the assembled file as a DIF archive. CPU-bound, blocking.
     let assembled_path = assembled.path().to_path_buf();
     let request_name = entry.name.clone().unwrap_or_else(|| "upload".to_string());
+    let requested_debug_id = entry
+        .debug_id
+        .as_deref()
+        .and_then(|id| id.parse::<DebugId>().ok());
     let processed = tokio::task::spawn_blocking(move || -> Result<Vec<ProcessedObject>, String> {
-        process_assembled(&assembled_path, &request_name)
+        process_assembled(&assembled_path, &request_name, requested_debug_id)
     })
     .await
     .map_err(|e| format!("join: {e}"))??;
@@ -459,27 +480,33 @@ pub(crate) async fn assemble_one(
     };
     let mut artifacts = Vec::with_capacity(processed.len());
     for obj in processed {
+        let metadata = |kind| ArtifactMetadata {
+            project_id,
+            release_id: None,
+            debug_id: &obj.debug_id,
+            arch: &obj.arch,
+            code_id: obj.code_id.as_deref(),
+            source_name: &obj.source_name,
+            kind,
+        };
         let (kind, payload) = match obj.payload {
             ProcessedPayload::SymCache(bytes) => ("native", ArtifactPayload::Bytes(bytes)),
             ProcessedPayload::SourceBundle => {
                 ("source_bundle", ArtifactPayload::File(assembled.path()))
             }
         };
-        store_artifact(
-            db,
-            &config.artifacts_dir,
-            ArtifactMetadata {
-                project_id,
-                release_id: None,
-                debug_id: &obj.debug_id,
-                arch: &obj.arch,
-                code_id: obj.code_id.as_deref(),
-                source_name: &obj.source_name,
-                kind,
-            },
-            payload,
-        )
-        .await?;
+        store_artifact(db, &config.artifacts_dir, metadata(kind), payload).await?;
+        let cfi_stored = match obj.cfi {
+            Some(cache) => cfi::store(db, &config.artifacts_dir, metadata(kind), cache).await,
+            None => false,
+        };
+        if cfi_stored {
+            artifacts.push(AssemblyArtifact {
+                debug_id: obj.debug_id.clone(),
+                arch: obj.arch.clone(),
+                kind: cfi::KIND.to_string(),
+            });
+        }
         artifacts.push(AssemblyArtifact {
             debug_id: obj.debug_id,
             arch: obj.arch,
@@ -489,6 +516,7 @@ pub(crate) async fn assemble_one(
     Ok(AssemblyResult {
         response,
         artifacts,
+        processing_version: PROCESSING_VERSION,
     })
 }
 
@@ -587,6 +615,7 @@ async fn assemble_dart_symbol_map(
             arch: "any".to_string(),
             kind: dart_symbol_map::KIND.to_string(),
         }],
+        processing_version: PROCESSING_VERSION,
     })
 }
 
@@ -601,6 +630,8 @@ struct ProcessedObject {
     source_name: String,
     payload: ProcessedPayload,
     features: Vec<&'static str>,
+    /// Serialized CFI cache, for objects with unwind records.
+    cfi: Option<Vec<u8>>,
 }
 
 enum ProcessedPayload {
@@ -611,7 +642,11 @@ enum ProcessedPayload {
     SourceBundle,
 }
 
-fn process_assembled(path: &Path, source_name: &str) -> Result<Vec<ProcessedObject>, String> {
+fn process_assembled(
+    path: &Path,
+    source_name: &str,
+    requested_debug_id: Option<DebugId>,
+) -> Result<Vec<ProcessedObject>, String> {
     let view = ByteView::open(path).map_err(|e| format!("open assembled: {e}"))?;
     let archive = Archive::parse(&view).map_err(|e| format!("archive parse: {e}"))?;
     let mut out = Vec::new();
@@ -623,15 +658,31 @@ fn process_assembled(path: &Path, source_name: &str) -> Result<Vec<ProcessedObje
                 continue;
             }
         };
-        if let Some(po) = object_to_processed(&object, source_name) {
+        if let Some(po) = object_to_processed(&object, source_name, requested_debug_id) {
             out.push(po);
         }
     }
     Ok(out)
 }
 
-fn object_to_processed(object: &Object<'_>, source_name: &str) -> Option<ProcessedObject> {
-    let debug_id = normalize_debug_id(&object.debug_id().to_string());
+/// sentry-cli rewrites a PDB's age to the age in the matching PE's CodeView
+/// record, because that is the identifier events carry. Like Sentry
+/// (`DifMeta.from_object`), only the age may be overridden: a request whose
+/// GUID differs from the object's keeps the object's own identifier.
+fn effective_debug_id(object: DebugId, requested: Option<DebugId>) -> DebugId {
+    match requested {
+        Some(requested) if requested.uuid() == object.uuid() => requested,
+        _ => object,
+    }
+}
+
+fn object_to_processed(
+    object: &Object<'_>,
+    source_name: &str,
+    requested_debug_id: Option<DebugId>,
+) -> Option<ProcessedObject> {
+    let debug_id = effective_debug_id(object.debug_id(), requested_debug_id);
+    let debug_id = normalize_debug_id(&debug_id.to_string());
     if debug_id.is_empty() {
         return None;
     }
@@ -647,6 +698,7 @@ fn object_to_processed(object: &Object<'_>, source_name: &str) -> Option<Process
             source_name: source_name.to_string(),
             payload: ProcessedPayload::SourceBundle,
             features,
+            cfi: None,
         });
     }
 
@@ -667,6 +719,7 @@ fn object_to_processed(object: &Object<'_>, source_name: &str) -> Option<Process
         source_name: source_name.to_string(),
         payload: ProcessedPayload::SymCache(bytes),
         features,
+        cfi: cfi::cache_bytes(object),
     })
 }
 
@@ -685,4 +738,41 @@ fn collect_features(object: &Object<'_>) -> Vec<&'static str> {
         f.push("sources");
     }
     f
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Plezy 2.23.0's Windows upload (sentry-cli 2.58.6) reported "Found 0
+    /// debug information files" for every PE/PDB batch because `pdbs` was
+    /// not accepted, so `flutter_windows.dll.pdb` never reached the tracker.
+    #[test]
+    fn chunk_upload_options_accept_pdbs() {
+        let options = chunk_upload_options(&UploadsConfig::default(), "default");
+        let accept: Vec<&str> = options["accept"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        for capability in ["debug_files", "pdbs", "sources", "dartsymbolmap"] {
+            assert!(accept.contains(&capability), "accept: {accept:?}");
+        }
+    }
+
+    #[test]
+    fn assemble_debug_id_overrides_only_pdb_age() {
+        // flutter_windows.dll from Plezy 2.23.0 Windows event #1581.
+        let pe: DebugId = "fd848531-4654-4681-9325-1d5c015a7dad-3".parse().unwrap();
+        let pdb: DebugId = "fd848531-4654-4681-9325-1d5c015a7dad-1".parse().unwrap();
+        assert_eq!(effective_debug_id(pdb, Some(pe)), pe);
+        assert_eq!(
+            normalize_debug_id(&effective_debug_id(pdb, Some(pe)).to_string()),
+            normalize_debug_id("fd848531-4654-4681-9325-1d5c015a7dad-3"),
+        );
+        assert_eq!(effective_debug_id(pdb, None), pdb);
+        let unrelated: DebugId = "480b273d-5bc7-66ca-4c4c-44205044422e-1".parse().unwrap();
+        assert_eq!(effective_debug_id(pdb, Some(unrelated)), pdb);
+    }
 }

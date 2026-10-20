@@ -119,14 +119,36 @@ Assembly jobs and completed receipts are stored in SQLite. Admitted jobs pin the
 chunks with hard links under the artifacts directory, so chunk retention cannot
 remove active inputs. Workers renew 60-second leases; unfinished jobs are reclaimed
 after a crashed worker's lease expires. Completed receipts survive chunk expiry and
-check the current canonical artifact before returning success. Failed attempts stay
-visible for 60 seconds before a new request may retry them.
+check the current canonical artifact before returning success. Receipts written by
+older processing (before CFI extraction) are discarded, so the next upload of the
+same file is processed again. Failed attempts stay visible for 60 seconds before a
+new request may retry them.
 
 Native artifacts are selected by project, debug ID, architecture and kind. Immutable
 content-addressed files prevent concurrent replacement of mapped caches; measured
 debug/line information takes precedence over stripped symbols. Keep assembly
 concurrency at one on memory-constrained deployments: chunk-upload concurrency does
 not limit conversion memory.
+
+The chunk-upload capabilities include `pdbs`; without it sentry-cli silently skips
+every PE and PDB file. A PDB whose age sentry-cli corrected to match its PE is stored
+under the corrected debug ID; only the age may differ from the file's own.
+
+Frames are symbolicated like Sentry: `addr_mode: "rel:<debug_id or index>"` addresses
+are image-relative, inlined calls expand into one frame each (outermost first), and
+caller frames are looked up at their call instruction unless the stacktrace's
+`instruction_addr_adjustment` says the client already adjusted them. A function name
+sent by the client is replaced only by real debug info (line tables, inlinees), never
+by a bare symbol-table guess. A symbol-table lookup that lands in an unsized last
+symbol (such as ELF `_fini`, which is followed only by data) yields no name.
+
+Objects with unwind information (ELF `.eh_frame`/`.debug_frame`, Mach-O compact
+unwind, PE `.pdata`, x86 PDB frame data, Breakpad `STACK` records) also get a CFI
+cache next to their SymCache. Crashpad minidumps are stackwalked with the CFI of
+their modules' uploaded debug files and fall back to frame pointers and stack
+scanning elsewhere; each frame's `trust` records the method.
+`objcopy --only-keep-debug` files keep `.eh_frame` only as an empty placeholder,
+so upload the shipped (stripped) binaries as well.
 
 Before upgrading an existing deployment, back up both the database and artifacts.
 Migrations 019–020 rebuild artifact identity and add durable assembly state;

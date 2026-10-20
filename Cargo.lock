@@ -312,6 +312,7 @@ dependencies = [
  "mime_guess",
  "minidump",
  "minidump-processor",
+ "minidump-synth",
  "minidump-unwind",
  "multer",
  "once_cell",
@@ -330,6 +331,7 @@ dependencies = [
  "subtle",
  "symbolic",
  "tempfile",
+ "test-assembler",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -1788,6 +1790,17 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "minidump-synth"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07afd34de3dca5e586126c8226a023ebecfac4642d67e90857bec753ea88fb3a"
+dependencies = [
+ "minidump-common",
+ "scroll 0.13.0",
+ "test-assembler",
 ]
 
 [[package]]
@@ -3388,10 +3401,22 @@ version = "12.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e832005e6261d508717815bac8e2c096161b33b713a032861b3a13ae4cd60ed"
 dependencies = [
+ "symbolic-cfi",
  "symbolic-common",
  "symbolic-debuginfo",
  "symbolic-demangle",
  "symbolic-symcache",
+]
+
+[[package]]
+name = "symbolic-cfi"
+version = "12.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8d7ae026fdd9ac37fa77d956aabb60d8cc306bd4f5a38eafc28ad2a003e14cf"
+dependencies = [
+ "symbolic-common",
+ "symbolic-debuginfo",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3540,6 +3565,15 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "test-assembler"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a6da51de149453f5c43fa67d5e73cccd75b3c5727a38a2f18c5f3c47f2db582"
+dependencies = [
+ "byteorder",
 ]
 
 [[package]]

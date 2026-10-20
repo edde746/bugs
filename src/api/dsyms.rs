@@ -4,7 +4,8 @@
 //! or ZIP-packed) and pre-processes each contained `Object` into a
 //! `SymCache` stored on disk. A row in `artifact_debug_ids` indexes each
 //! SymCache by `(project_id, debug_id, arch, kind='native')` for lookup at
-//! ingest time.
+//! ingest time; objects with unwind records also get a CFI cache
+//! (`kind='cfi'`, see `crate::ingest::cfi`) for minidump stackwalking.
 
 use std::{
     fs::File,
@@ -26,6 +27,7 @@ use tokio::io::AsyncWriteExt;
 use tracing::warn;
 
 use crate::AppState;
+use crate::ingest::cfi;
 use crate::models::release::Release;
 use crate::util::artifact_store::{ArtifactMetadata, ArtifactPayload, store_artifact};
 use crate::util::id::normalize_debug_id;
@@ -57,6 +59,8 @@ struct ConvertedDif {
     code_id: Option<String>,
     source_name: String,
     symcache_bytes: Vec<u8>,
+    /// Serialized CFI cache, for objects with unwind records.
+    cfi: Option<Vec<u8>>,
 }
 
 struct ConversionError {
@@ -153,18 +157,19 @@ pub async fn upload_dsym(
     let mut uploaded = Vec::new();
     for dif in converted {
         let size = dif.symcache_bytes.len();
+        let metadata = |kind| ArtifactMetadata {
+            project_id,
+            release_id,
+            debug_id: &dif.debug_id,
+            arch: &dif.arch,
+            code_id: dif.code_id.as_deref(),
+            source_name: &dif.source_name,
+            kind,
+        };
         if let Err(e) = store_artifact(
             &state.db,
             &state.config.artifacts_dir,
-            ArtifactMetadata {
-                project_id,
-                release_id,
-                debug_id: &dif.debug_id,
-                arch: &dif.arch,
-                code_id: dif.code_id.as_deref(),
-                source_name: &dif.source_name,
-                kind: "native",
-            },
+            metadata("native"),
             ArtifactPayload::Bytes(dif.symcache_bytes),
         )
         .await
@@ -175,6 +180,15 @@ pub async fn upload_dsym(
                 reason: e,
             });
             continue;
+        }
+        if let Some(cache) = dif.cfi {
+            cfi::store(
+                &state.db,
+                &state.config.artifacts_dir,
+                metadata("native"),
+                cache,
+            )
+            .await;
         }
 
         uploaded.push(UploadedDif {
@@ -441,6 +455,7 @@ fn convert_one_view(
             code_id,
             source_name: source_name.to_string(),
             symcache_bytes,
+            cfi: cfi::cache_bytes(&object),
         }));
     }
 }
