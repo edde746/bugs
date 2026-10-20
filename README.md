@@ -118,7 +118,9 @@ failures. Expensive hashing and SymCache conversion do not run in the HTTP handl
 Assembly jobs and completed receipts are stored in SQLite. Admitted jobs pin their
 chunks with hard links under the artifacts directory, so chunk retention cannot
 remove active inputs. Workers renew 60-second leases; unfinished jobs are reclaimed
-after a crashed worker's lease expires. Completed receipts survive chunk expiry and
+after a crashed worker's lease expires. A job claimed a fourth time fails with an
+error instead of being converted again, so a file that kills the process (e.g. out
+of memory) cannot crash-loop it. Completed receipts survive chunk expiry and
 check the current canonical artifact before returning success. Receipts written by
 older processing (before CFI extraction) are discarded, so the next upload of the
 same file is processed again. Failed attempts stay visible for 60 seconds before a
@@ -132,7 +134,12 @@ not limit conversion memory.
 
 The chunk-upload capabilities include `pdbs`; without it sentry-cli silently skips
 every PE and PDB file. A PDB whose age sentry-cli corrected to match its PE is stored
-under the corrected debug ID; only the age may differ from the file's own.
+under the corrected debug ID; only the age may differ from the file's own. Converting
+a PDB copies nearly all of it into memory (type, ID and module streams), on top of
+the SymCache being built, so budget well over the size of the largest PDB per
+assembly worker. Clients wait at most the advertised `maxWait` from their first
+assemble poll, including time queued behind other uploads; a file still processing
+then is reported as an error by sentry-cli but finishes on the server.
 
 Frames are symbolicated like Sentry: `addr_mode: "rel:<debug_id or index>"` addresses
 are image-relative, inlined calls expand into one frame each (outermost first), and
