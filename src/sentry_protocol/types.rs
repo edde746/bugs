@@ -25,7 +25,7 @@ pub struct SentryEvent {
     pub server_name: Option<String>,
     #[serde(default)]
     pub transaction: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_message")]
     pub message: Option<String>,
     #[serde(default)]
     pub logentry: Option<LogEntry>,
@@ -234,5 +234,74 @@ where
             Ok(Some(iface))
         }
         Some(_) => Ok(None),
+    }
+}
+
+/// Deserialize `message` from either a bare string or the message-interface
+/// object `{"formatted": ..., "message": ..., "params": [...]}` that the Dart
+/// SDK sends for `captureMessage`. Sentry treats the attribute as an alias of
+/// `logentry`; the formatted text wins over the unformatted template because
+/// that is what the event is titled with. Any other shape carries no message.
+fn deserialize_message<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    Ok(match value {
+        Some(serde_json::Value::String(message)) => Some(message),
+        Some(serde_json::Value::Object(mut map)) => {
+            ["formatted", "message"]
+                .into_iter()
+                .find_map(|key| match map.remove(key) {
+                    Some(serde_json::Value::String(message)) => Some(message),
+                    _ => None,
+                })
+        }
+        _ => None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message_of(event: serde_json::Value) -> Option<String> {
+        serde_json::from_value::<SentryEvent>(event)
+            .unwrap()
+            .message
+    }
+
+    #[test]
+    fn object_message_reads_as_its_formatted_text() {
+        let dart = serde_json::json!({
+            "level": "warning",
+            "message": {"formatted": "Previous Android application exit"},
+        });
+        let plain = serde_json::json!({
+            "level": "warning",
+            "message": "Previous Android application exit",
+        });
+        assert_eq!(message_of(dart), message_of(plain));
+    }
+
+    #[test]
+    fn object_message_prefers_formatted_over_template() {
+        let both = serde_json::json!({"message": {
+            "message": "Retry %s",
+            "formatted": "Retry 3",
+            "params": ["3"],
+        }});
+        assert_eq!(message_of(both).as_deref(), Some("Retry 3"));
+
+        let template_only =
+            serde_json::json!({"message": {"message": "Retry %s", "params": ["3"]}});
+        assert_eq!(message_of(template_only).as_deref(), Some("Retry %s"));
+    }
+
+    #[test]
+    fn unusable_message_shapes_keep_the_event() {
+        for message in [serde_json::json!({"params": ["3"]}), serde_json::json!(42)] {
+            assert_eq!(message_of(serde_json::json!({"message": message})), None);
+        }
     }
 }
